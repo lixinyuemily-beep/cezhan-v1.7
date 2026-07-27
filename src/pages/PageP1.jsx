@@ -896,7 +896,7 @@ export const PageP1 = ({
           <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 8 }}>
             仅支持固定模板：{EXHIBIT_TEMPLATE_HEADERS.join('、')}。模板不匹配会直接报错；`.xlsx` 中可解析图片列与嵌入图片，当前支持异步解析最高 360MB。
             <a
-              href="/examples/民族文化宫-组A展品.xlsx"
+              href="/downloads/民族文化宫-组A展品.xlsx"
               download="民族文化宫-组A展品.xlsx"
               style={{
                 marginLeft: 8,
