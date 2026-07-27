@@ -46,6 +46,8 @@ const DEFAULT_ADVANCED_SETTINGS = {
 const AUTH_STORAGE_KEY = 'curation_auth_session';
 const GUEST_USER_ID_STORAGE_KEY = 'curation_guest_user_id';
 
+const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
+
 function generateGuestUserId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return `guest_${crypto.randomUUID()}`;
@@ -316,7 +318,7 @@ export function useCurationStore() {
                 () => api.ai.generatePreface(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
                 {
                   label: 'generate preface',
-                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
                 }
               );
               textSectionsData.push({
@@ -331,6 +333,7 @@ export function useCurationStore() {
                 key: 'preface',
                 title: '展览序言',
                 text: '<p>序言生成失败，请手动编辑</p>',
+                failed: true,
                 edited: false,
               });
             }
@@ -354,7 +357,7 @@ export function useCurationStore() {
                 }),
                 {
                   label: `generate text section ${unit.title}`,
-                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
                 }
               );
               
@@ -390,6 +393,7 @@ export function useCurationStore() {
                 title: unit.title,
                 text: '<p>文本生成失败，请手动编辑</p>',
                 exhibits: [],
+                failed: true,
                 edited: false,
               });
             }
@@ -402,7 +406,7 @@ export function useCurationStore() {
                 () => api.ai.generateEpilogue(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
                 {
                   label: 'generate epilogue',
-                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
                 }
               );
               textSectionsData.push({
@@ -417,6 +421,7 @@ export function useCurationStore() {
                 key: 'epilogue',
                 title: '展览尾声',
                 text: '<p>尾声生成失败，请手动编辑</p>',
+                failed: true,
                 edited: false,
               });
             }

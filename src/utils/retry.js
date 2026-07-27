@@ -1,7 +1,7 @@
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function retryAsync(task, options = {}) {
-  const retries = Math.max(1, Number(options.retries || 3));
+  const retries = Math.max(1, Number(options.retries || 4));
   const delayMs = Math.max(0, Number(options.delayMs || 1200));
   const label = options.label || 'async task';
   let lastError;

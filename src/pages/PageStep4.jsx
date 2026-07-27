@@ -74,6 +74,7 @@ export const PageStep4 = ({
   const [regeneratingKey, setRegeneratingKey] = useState(null);
   const editorRef = useRef(null);
   const savedSelectionRef = useRef(null);
+  const autoRepairingRef = useRef(new Set());
   const currentNarrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
   const infoCardStyle = {
     padding: "14px 16px",
@@ -103,6 +104,91 @@ export const PageStep4 = ({
     }
   };
 
+  const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
+
+  const parseTextSectionContent = (rawContent = '') => {
+    let content = rawContent || '';
+    let exhibitSummaries = [];
+    let summary = '';
+
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.intro) {
+          content = `<p>${parsed.intro}</p>`;
+        }
+        if (parsed.exhibits && Array.isArray(parsed.exhibits)) {
+          exhibitSummaries = parsed.exhibits;
+        }
+        if (parsed.summary) {
+          summary = `<p>${parsed.summary}</p>`;
+        }
+      }
+    } catch (e) {
+      console.error('解析文本响应失败:', e);
+    }
+
+    return { text: content + summary, exhibits: exhibitSummaries };
+  };
+
+  const buildGenerationContext = () => {
+    const narrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
+    const narrativeRhythm = currentProject?.llmParams?.narrative_rhythm || null;
+    const regularUnits = (units || []).filter(u => u.tag !== '序章' && u.tag !== '尾声');
+    const exhibitionTitle =
+      currentProject?.exhibitionTitle ||
+      currentProject?.llmParams?.exhibition_title ||
+      currentProject?.title ||
+      narrative?.title ||
+      '展览';
+
+    return { narrative, narrativeRhythm, regularUnits, exhibitionTitle };
+  };
+
+  const generateSectionContent = async (sectionKey) => {
+    const { narrative, narrativeRhythm, regularUnits, exhibitionTitle } = buildGenerationContext();
+
+    if (sectionKey === 'preface') {
+      const response = await retryAsync(
+        () => api.ai.generatePreface(exhibitionTitle, regularUnits.length, narrative, narrativeRhythm),
+        {
+          label: 'generate preface',
+          shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+        }
+      );
+      return { text: response.content, exhibits: [] };
+    }
+
+    if (sectionKey === 'epilogue') {
+      const response = await retryAsync(
+        () => api.ai.generateEpilogue(exhibitionTitle, regularUnits.length, narrative, narrativeRhythm),
+        {
+          label: 'generate epilogue',
+          shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+        }
+      );
+      return { text: response.content, exhibits: [] };
+    }
+
+    const unit = regularUnits[Number(sectionKey)];
+    const unitExhibits = keptExhibits?.[sectionKey] || [];
+    const response = await retryAsync(
+      () => api.ai.generateTextSection({
+        unit,
+        exhibits: unitExhibits,
+        narrative,
+        narrative_rhythm: narrativeRhythm,
+      }),
+      {
+        label: `generate text section ${unit?.title || sectionKey}`,
+        shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+      }
+    );
+
+    return parseTextSectionContent(response.content || '');
+  };
+
   useEffect(() => {
     if (currentProject) {
       if (currentProject.units && currentProject.units.length > 0 && (!units || units.length === 0)) {
@@ -116,6 +202,55 @@ export const PageStep4 = ({
       }
     }
   }, [currentProject]);
+
+  useEffect(() => {
+    const repairableSections = (textSections || []).filter((section) =>
+      section?.failed || isFailureText(section?.text)
+    );
+    if (repairableSections.length === 0 || regeneratingKey) return;
+
+    const section = repairableSections.find((item) => !autoRepairingRef.current.has(item.key));
+    if (!section) return;
+
+    let cancelled = false;
+    autoRepairingRef.current.add(section.key);
+    setRegeneratingKey(section.key);
+    setTextSections((sections) => sections.map((item) =>
+      item.key === section.key ? { ...item, failed: true, autoRepairing: true } : item
+    ));
+
+    generateSectionContent(section.key)
+      .then((generated) => {
+        if (cancelled) return;
+        const nextTextSections = (textSections || []).map((item) =>
+          item.key === section.key
+            ? { ...item, text: generated.text, exhibits: generated.exhibits, edited: false, failed: false, autoRepairing: false, error: '' }
+            : item
+        );
+        setTextSections(nextTextSections);
+        markStep4Edited(nextTextSections);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('自动修复文本生成失败:', error);
+        const nextTextSections = (textSections || []).map((item) =>
+          item.key === section.key
+            ? { ...item, failed: true, autoRepairing: false, error: error.message || '自动修复失败' }
+            : item
+        );
+        setTextSections(nextTextSections);
+        markStep4Edited(nextTextSections);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRegeneratingKey(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [textSections, regeneratingKey, units, keptExhibits, currentProject, selectedNarrative, narrativeOptions]);
 
   const saveEditorSelection = () => {
     const selection = window.getSelection?.();
@@ -183,6 +318,7 @@ export const PageStep4 = ({
   };
 
   const handleRegenerate = (sectionKey) => {
+    if (regeneratingKey) return;
     setRegenerateModal({
       key: sectionKey,
       title: textSections.find(s => s.key === sectionKey)?.title || sectionKey
@@ -197,104 +333,11 @@ export const PageStep4 = ({
     setRegenerateModal(null);
 
     try {
-      const narrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
-      const narrativeRhythm = currentProject?.llmParams?.narrative_rhythm || null;
-      const regularUnits = (units || []).filter(u => u.tag !== '序章' && u.tag !== '尾声');
-      const exhibitionTitle =
-        currentProject?.exhibitionTitle ||
-        currentProject?.llmParams?.exhibition_title ||
-        currentProject?.title ||
-        narrative?.title ||
-        '展览';
-
-      if (sectionKey === 'preface') {
-        const response = await retryAsync(
-          () => api.ai.generatePreface(
-            exhibitionTitle,
-            regularUnits.length,
-            narrative,
-            narrativeRhythm
-          ),
-          {
-            label: 'regenerate preface',
-            shouldRetryResult: (result) => !String(result?.content || '').trim(),
-          }
-        );
-
-        const nextTextSections = textSections.map(s =>
-          s.key === sectionKey
-            ? { ...s, text: response.content, edited: false }
-            : s
-        );
-        setTextSections(nextTextSections);
-        markStep4Edited(nextTextSections);
-        return;
-      }
-
-      if (sectionKey === 'epilogue') {
-        const response = await retryAsync(
-          () => api.ai.generateEpilogue(
-            exhibitionTitle,
-            regularUnits.length,
-            narrative,
-            narrativeRhythm
-          ),
-          {
-            label: 'regenerate epilogue',
-            shouldRetryResult: (result) => !String(result?.content || '').trim(),
-          }
-        );
-
-        const nextTextSections = textSections.map(s =>
-          s.key === sectionKey
-            ? { ...s, text: response.content, edited: false }
-            : s
-        );
-        setTextSections(nextTextSections);
-        markStep4Edited(nextTextSections);
-        return;
-      }
-
-      const unit = regularUnits[Number(sectionKey)];
-      const unitExhibits = keptExhibits?.[sectionKey] || [];
-      const response = await retryAsync(
-        () => api.ai.generateTextSection({
-          unit: unit,
-          exhibits: unitExhibits,
-          narrative: narrative,
-          narrative_rhythm: narrativeRhythm,
-        }),
-        {
-          label: `regenerate text section ${unit?.title || sectionKey}`,
-          shouldRetryResult: (result) => !String(result?.content || '').trim(),
-        }
-      );
-
-      let content = response.content || '';
-      let exhibitSummaries = [];
-      let summary = '';
-
-      try {
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.intro) {
-            content = `<p>${parsed.intro}</p>`;
-          }
-          if (parsed.exhibits && Array.isArray(parsed.exhibits)) {
-            exhibitSummaries = parsed.exhibits;
-          }
-          if (parsed.summary) {
-            summary = `<p>${parsed.summary}</p>`;
-          }
-        }
-      } catch (e) {
-        console.error('解析文本响应失败:', e);
-      }
+      const generated = await generateSectionContent(sectionKey);
 
       const nextTextSections = textSections.map(s =>
         s.key === sectionKey
-          ? { ...s, text: content + summary, exhibits: exhibitSummaries, edited: false }
+          ? { ...s, text: generated.text, exhibits: generated.exhibits, edited: false, failed: false, error: '' }
           : s
       );
       setTextSections(nextTextSections);
@@ -420,13 +463,20 @@ export const PageStep4 = ({
                 {sec.title}
               </h2>
               {sec.edited && <Tag label="[已修改]" color={C.humanEdited} textColor={C.accentSecondary} />}
+              {sec.autoRepairing && <Tag label="[自动修复中]" color={C.aiGenerated} textColor={C.accentPrimary} />}
             </div>
             <span
               onClick={() => handleRegenerate(sec.key)}
-              style={{ color: C.accentPrimary, cursor: "pointer", fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}
-              disabled={regeneratingKey !== null}
+              style={{
+                color: regeneratingKey ? C.textSecondary : C.accentPrimary,
+                cursor: regeneratingKey ? "not-allowed" : "pointer",
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
             >
-              <RefreshIcon /> 重新生成
+              <RefreshIcon /> {regeneratingKey === sec.key ? '生成中' : '重新生成'}
             </span>
           </div>
 
@@ -469,7 +519,7 @@ export const PageStep4 = ({
                 fontSize: 14, lineHeight: 1.8, color: C.textPrimary, fontFamily: "var(--font-serif)",
                 border: `1px solid ${sec.edited ? C.accentSecondary + "44" : C.accentPrimary + "22"}`,
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(sec.text) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(sec.autoRepairing ? '<p>正在自动修复文本，请稍候…</p>' : sec.text) }}
             />
           )}
 
