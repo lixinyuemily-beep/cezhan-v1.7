@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
 import { api } from '../api/client';
+import { retryAsync } from '../utils/retry';
 
 const RefreshIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -207,16 +208,22 @@ export const PageStep4 = ({
         '展览';
 
       if (sectionKey === 'preface') {
-        const response = await api.ai.generatePreface(
-          exhibitionTitle,
-          regularUnits.length,
-          narrative,
-          narrativeRhythm
+        const response = await retryAsync(
+          () => api.ai.generatePreface(
+            exhibitionTitle,
+            regularUnits.length,
+            narrative,
+            narrativeRhythm
+          ),
+          {
+            label: 'regenerate preface',
+            shouldRetryResult: (result) => !String(result?.content || '').trim(),
+          }
         );
 
         const nextTextSections = textSections.map(s =>
           s.key === sectionKey
-            ? { ...s, text: response.content || '<p>序言生成失败，请手动编辑</p>', edited: false }
+            ? { ...s, text: response.content, edited: false }
             : s
         );
         setTextSections(nextTextSections);
@@ -225,16 +232,22 @@ export const PageStep4 = ({
       }
 
       if (sectionKey === 'epilogue') {
-        const response = await api.ai.generateEpilogue(
-          exhibitionTitle,
-          regularUnits.length,
-          narrative,
-          narrativeRhythm
+        const response = await retryAsync(
+          () => api.ai.generateEpilogue(
+            exhibitionTitle,
+            regularUnits.length,
+            narrative,
+            narrativeRhythm
+          ),
+          {
+            label: 'regenerate epilogue',
+            shouldRetryResult: (result) => !String(result?.content || '').trim(),
+          }
         );
 
         const nextTextSections = textSections.map(s =>
           s.key === sectionKey
-            ? { ...s, text: response.content || '<p>尾声生成失败，请手动编辑</p>', edited: false }
+            ? { ...s, text: response.content, edited: false }
             : s
         );
         setTextSections(nextTextSections);
@@ -244,12 +257,18 @@ export const PageStep4 = ({
 
       const unit = regularUnits[Number(sectionKey)];
       const unitExhibits = keptExhibits?.[sectionKey] || [];
-      const response = await api.ai.generateTextSection({
-        unit: unit,
-        exhibits: unitExhibits,
-        narrative: narrative,
-        narrative_rhythm: narrativeRhythm,
-      });
+      const response = await retryAsync(
+        () => api.ai.generateTextSection({
+          unit: unit,
+          exhibits: unitExhibits,
+          narrative: narrative,
+          narrative_rhythm: narrativeRhythm,
+        }),
+        {
+          label: `regenerate text section ${unit?.title || sectionKey}`,
+          shouldRetryResult: (result) => !String(result?.content || '').trim(),
+        }
+      );
 
       let content = response.content || '';
       let exhibitSummaries = [];

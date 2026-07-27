@@ -12,6 +12,7 @@ import {
   normalizeImportedExhibit,
   normalizePreviewExhibitGroups,
 } from '../utils/exhibitFields';
+import { retryAsync } from '../utils/retry';
 
 const initialProject = {
   id: null,
@@ -311,11 +312,17 @@ export function useCurationStore() {
           const prefaceUnit = units.find(u => u.tag === '序章');
           if (prefaceUnit) {
             try {
-              const response = await api.ai.generatePreface(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm);
+              const response = await retryAsync(
+                () => api.ai.generatePreface(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
+                {
+                  label: 'generate preface',
+                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                }
+              );
               textSectionsData.push({
                 key: 'preface',
                 title: '展览序言',
-                text: response.content || '<p>序言生成失败</p>',
+                text: response.content,
                 edited: false,
               });
             } catch (err) {
@@ -338,12 +345,18 @@ export function useCurationStore() {
             const unitExhibits = keptExhibits[unitId] || [];
             
             try {
-              const response = await api.ai.generateTextSection({
-                unit: unit,
-                exhibits: unitExhibits,
-                narrative: narrative,
-                narrative_rhythm: activeNarrativeRhythm,
-              });
+              const response = await retryAsync(
+                () => api.ai.generateTextSection({
+                  unit: unit,
+                  exhibits: unitExhibits,
+                  narrative: narrative,
+                  narrative_rhythm: activeNarrativeRhythm,
+                }),
+                {
+                  label: `generate text section ${unit.title}`,
+                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                }
+              );
               
               let content = response.content || '';
               let exhibitSummaries = [];
@@ -385,11 +398,17 @@ export function useCurationStore() {
           const epilogueUnit = units.find(u => u.tag === '尾声');
           if (epilogueUnit) {
             try {
-              const response = await api.ai.generateEpilogue(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm);
+              const response = await retryAsync(
+                () => api.ai.generateEpilogue(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
+                {
+                  label: 'generate epilogue',
+                  shouldRetryResult: (result) => !String(result?.content || '').trim(),
+                }
+              );
               textSectionsData.push({
                 key: 'epilogue',
                 title: '展览尾声',
-                text: response.content || '<p>尾声生成失败</p>',
+                text: response.content,
                 edited: false,
               });
             } catch (err) {
