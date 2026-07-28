@@ -5,6 +5,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const EXHIBIT_PARSE_START_TIMEOUT = 30 * 60 * 1000;
 const EXHIBIT_PARSE_POLL_INTERVAL_MS = 1200;
 const AI_GENERATION_TIMEOUT = 3 * 60 * 1000;
+const AI_BATCH_GENERATION_TIMEOUT = 5 * 60 * 1000;
 const AUTH_STORAGE_KEY = 'curation_auth_session';
 
 const apiClient = axios.create({
@@ -140,6 +141,7 @@ export const api = {
     generateUnits: (data) => apiClient.post('/ai/units', data),
     recommendExhibits: (data) => apiClient.post('/ai/recommend', data),
     recommendExhibitsBatch: (data) => apiClient.post('/ai/recommend-batch', data),
+    generateTextSectionsBatch: (data) => apiClient.post('/ai/text-sections-batch', data, { timeout: AI_BATCH_GENERATION_TIMEOUT }),
     generateTextSection: (data) => apiClient.post('/ai/text-section', data, { timeout: AI_GENERATION_TIMEOUT }),
     generatePreface: (exhibitionTitle, unitCount, narrative, narrativeRhythm) => 
       apiClient.post('/ai/preface', {}, { timeout: AI_GENERATION_TIMEOUT, params: { exhibition_title: exhibitionTitle, unit_count: unitCount, narrative_title: narrative?.title || '', narrative_desc: narrative?.desc || '', narrative_rhythm: narrativeRhythm ? JSON.stringify(narrativeRhythm) : '' } }),

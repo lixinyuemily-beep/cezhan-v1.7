@@ -146,6 +146,56 @@ export const PageStep4 = ({
     return { narrative, narrativeRhythm, regularUnits, exhibitionTitle };
   };
 
+  const buildSectionsToGenerate = () => {
+    const { regularUnits } = buildGenerationContext();
+    const sections = [];
+
+    if ((units || []).some(unit => unit.tag === '序章') || textSections.some(section => section.key === 'preface')) {
+      sections.push({ key: 'preface', title: '展览序言', kind: 'preface' });
+    }
+
+    regularUnits.forEach((unit, index) => {
+      const key = String(index);
+      sections.push({
+        key,
+        title: unit.title,
+        kind: 'unit',
+        unit,
+        exhibits: keptExhibits?.[key] || [],
+      });
+    });
+
+    if ((units || []).some(unit => unit.tag === '尾声') || textSections.some(section => section.key === 'epilogue')) {
+      sections.push({ key: 'epilogue', title: '展览尾声', kind: 'epilogue' });
+    }
+
+    return sections;
+  };
+
+  const generateFullDraftSections = async () => {
+    const { narrative, narrativeRhythm, exhibitionTitle } = buildGenerationContext();
+    const sections = buildSectionsToGenerate();
+    const response = await retryAsync(
+      () => api.ai.generateTextSectionsBatch({
+        exhibition_title: exhibitionTitle,
+        sections,
+        kept_exhibits: keptExhibits || {},
+        narrative,
+        narrative_rhythm: narrativeRhythm,
+      }),
+      {
+        label: 'regenerate full text draft',
+        retries: 2,
+        delayMs: 1800,
+        shouldRetryResult: (result) => {
+          const generatedSections = result?.sections || [];
+          return generatedSections.length !== sections.length || generatedSections.some(section => !String(section?.text || '').trim() || isFailureText(section?.text));
+        },
+      }
+    );
+    return response.sections || [];
+  };
+
   const generateSectionContent = async (sectionKey) => {
     const { narrative, narrativeRhythm, regularUnits, exhibitionTitle } = buildGenerationContext();
 
@@ -240,6 +290,9 @@ export const PageStep4 = ({
         );
         setTextSections(nextTextSections);
         markStep4Edited(nextTextSections);
+        window.setTimeout(() => {
+          autoRepairingRef.current.delete(section.key);
+        }, 5000);
       })
       .finally(() => {
         if (!cancelled) {
@@ -344,6 +397,53 @@ export const PageStep4 = ({
       markStep4Edited(nextTextSections);
     } catch (error) {
       console.error('重新生成文本失败:', error);
+    } finally {
+      setRegeneratingKey(null);
+    }
+  };
+
+  const confirmRegenerateFromFullDraft = async () => {
+    if (!regenerateModal) return;
+
+    const sectionKey = regenerateModal.key;
+    setRegeneratingKey(sectionKey);
+    setRegenerateModal(null);
+
+    try {
+      const generatedSections = await generateFullDraftSections();
+      const generatedSection = generatedSections.find(section => String(section.key) === String(sectionKey));
+      if (!generatedSection?.text) {
+        throw new Error('整套生成结果里没有当前段落');
+      }
+
+      const nextTextSections = textSections.map(section =>
+        section.key === sectionKey
+          ? {
+              ...section,
+              title: generatedSection.title || section.title,
+              text: generatedSection.text,
+              exhibits: Array.isArray(generatedSection.exhibits) ? generatedSection.exhibits : section.exhibits,
+              edited: false,
+              failed: false,
+              autoRepairing: false,
+              error: '',
+            }
+          : section
+      );
+      setTextSections(nextTextSections);
+      markStep4Edited(nextTextSections);
+    } catch (error) {
+      console.error('整套生成并替换当前段失败:', error);
+      const nextTextSections = textSections.map(section =>
+        section.key === sectionKey
+          ? { ...section, failed: true, autoRepairing: true, error: error.message || '整套生成失败' }
+          : section
+      );
+      setTextSections(nextTextSections);
+      markStep4Edited(nextTextSections);
+      window.setTimeout(() => {
+        autoRepairingRef.current.delete(sectionKey);
+      }, 1000);
     } finally {
       setRegeneratingKey(null);
     }
@@ -519,7 +619,7 @@ export const PageStep4 = ({
                 fontSize: 14, lineHeight: 1.8, color: C.textPrimary, fontFamily: "var(--font-serif)",
                 border: `1px solid ${sec.edited ? C.accentSecondary + "44" : C.accentPrimary + "22"}`,
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(sec.autoRepairing ? '<p>正在自动修复文本，请稍候…</p>' : sec.text) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml((sec.autoRepairing || sec.failed || isFailureText(sec.text)) ? '<p>正在继续生成文本，请稍候…</p>' : sec.text) }}
             />
           )}
 
@@ -574,12 +674,12 @@ export const PageStep4 = ({
           <div style={{ padding: 20 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: C.textPrimary }}>重新生成确认</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20, lineHeight: 1.6 }}>
-              确定要重新生成「{regenerateModal.title}」的策展文本吗？<br/>
-              当前文本内容将被覆盖，无法恢复。
+              请选择「{regenerateModal.title}」的重新生成方式。当前段落内容将被覆盖，无法恢复。
             </p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <Btn variant="ghost" onClick={() => setRegenerateModal(null)}>取消</Btn>
-              <Btn onClick={confirmRegenerate}>确认重新生成</Btn>
+              <Btn variant="ghost" onClick={confirmRegenerate}>只生成当前段</Btn>
+              <Btn onClick={confirmRegenerateFromFullDraft}>整套生成，仅替换当前段</Btn>
             </div>
           </div>
         </Modal>

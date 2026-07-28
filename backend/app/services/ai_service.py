@@ -912,6 +912,133 @@ class AIService:
         )
         
         return result["content"]
+
+    @staticmethod
+    def _strip_json_fence(content: str) -> str:
+        text = str(content or "").strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return text.strip()
+
+    @classmethod
+    def generate_text_sections_batch(
+        cls,
+        exhibition_title: str,
+        sections: List[Dict],
+        kept_exhibits: Dict[str, List[Dict]],
+        narrative: Dict,
+        narrative_rhythm: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
+        sections_meta = []
+        for index, section in enumerate(sections or []):
+            section_key = str(section.get("key") if section.get("key") is not None else index)
+            section_kind = str(section.get("kind") or section.get("type") or "unit").strip()
+            unit = section.get("unit") if isinstance(section.get("unit"), dict) else {}
+            title = section.get("title") or unit.get("title") or f"段落 {index + 1}"
+            unit_exhibits = (
+                section.get("exhibits")
+                if isinstance(section.get("exhibits"), list)
+                else kept_exhibits.get(section_key) or kept_exhibits.get(str(unit.get("id"))) or []
+            )
+            sections_meta.append({
+                "key": section_key,
+                "title": title,
+                "kind": section_kind,
+                "description": section.get("description") or unit.get("description") or unit.get("desc") or unit.get("narrative") or "",
+                "exhibits": unit_exhibits,
+            })
+
+        if not sections_meta:
+            raise ValueError("整套文本生成失败：缺少 sections 参数。")
+
+        def summarize_exhibit(exhibit: Dict[str, Any]) -> str:
+            intro = cls._get_exhibit_intro(exhibit)
+            if len(intro) > 140:
+                intro = intro[:140] + "..."
+            return (
+                f"- {exhibit.get('name') or '未知展品'}；"
+                f"年代={cls._get_exhibit_time(exhibit)}；"
+                f"地点={cls._get_exhibit_place(exhibit)}；"
+                f"材质={cls._get_exhibit_material(exhibit)}；"
+                f"介绍={intro}"
+            )
+
+        section_blocks = []
+        for section in sections_meta:
+            kind = str(section["kind"]).lower()
+            if kind in {"unit", "text_section", "section", "主体单元"}:
+                exhibit_lines = "\n".join(summarize_exhibit(exhibit) for exhibit in section.get("exhibits", [])[:10])
+                section_blocks.append(
+                    f"key: {section['key']}\n"
+                    f"title: {section['title']}\n"
+                    f"type: 主体单元\n"
+                    f"description: {section.get('description', '')}\n"
+                    f"exhibits:\n{exhibit_lines or '- 无'}"
+                )
+            else:
+                section_blocks.append(
+                    f"key: {section['key']}\n"
+                    f"title: {section['title']}\n"
+                    f"type: {section['kind']}"
+                )
+
+        rhythm_instruction = cls._build_rhythm_instruction(narrative_rhythm, section_type="text_section")
+        result = cls.chat_completion(
+            messages=[
+                {"role": "system", "content": prompts.TEXT_BATCH_SYSTEM},
+                {"role": "user", "content": prompts.TEXT_BATCH_USER.format(
+                    exhibition_title=exhibition_title,
+                    narrative_title=narrative.get("title", ""),
+                    narrative_desc=narrative.get("desc", ""),
+                    rhythm_instruction=rhythm_instruction,
+                    sections_input="\n\n".join(section_blocks),
+                )}
+            ],
+            temperature=0.65,
+            max_tokens=8000,
+        )
+
+        raw_content = cls._strip_json_fence(result["content"])
+        try:
+            data = json.loads(raw_content)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", raw_content)
+            if not match:
+                raise ValueError("整套文本生成失败：模型未返回 JSON。")
+            data = json.loads(match.group(0))
+
+        sections = data.get("sections")
+        if not isinstance(sections, list):
+            raise ValueError("整套文本生成失败：模型返回缺少 sections。")
+
+        expected_keys = [section["key"] for section in sections_meta]
+        by_key = {str(section.get("key")): section for section in sections if section.get("key") is not None}
+        missing_keys = [key for key in expected_keys if key not in by_key]
+        if missing_keys:
+            raise ValueError(f"整套文本生成失败：缺少段落 {', '.join(missing_keys)}。")
+
+        normalized = []
+        for meta in sections_meta:
+            section = by_key[meta["key"]]
+            text = str(section.get("text") or "").strip()
+            if not text:
+                raise ValueError(f"整套文本生成失败：段落 {meta['title']} 内容为空。")
+            if not text.startswith("<"):
+                text = f"<p>{text}</p>"
+            exhibits = section.get("exhibits") if isinstance(section.get("exhibits"), list) else []
+            normalized.append({
+                "key": meta["key"],
+                "title": section.get("title") or meta["title"],
+                "text": text,
+                "exhibits": exhibits,
+                "edited": False,
+            })
+
+        return normalized
     
     @classmethod
     def generate_preface(

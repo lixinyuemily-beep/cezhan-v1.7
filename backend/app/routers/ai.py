@@ -11,6 +11,7 @@ from ..models.schemas import (
     BatchRecommendRequest, BatchRecommendResponse,
     TextSectionRequest as TextSectionReq,
     TextSectionResponse as TextSectionResp,
+    TextSectionsBatchRequest, TextSectionsBatchResponse,
     OutlineRequest, OutlineResponse
 )
 from ..services.ai_service import ai_service
@@ -93,6 +94,22 @@ async def generate_text_section(request: TextSectionReq):
             narrative_rhythm=request.narrative_rhythm
         )
         return TextSectionResp(content=content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/text-sections-batch", response_model=TextSectionsBatchResponse)
+async def generate_text_sections_batch(request: TextSectionsBatchRequest):
+    """一次性生成 Step4 全部策展文本，优先保证全文逻辑连贯"""
+    try:
+        sections = ai_service.generate_text_sections_batch(
+            exhibition_title=request.exhibition_title,
+            sections=request.sections,
+            kept_exhibits=request.kept_exhibits,
+            narrative=request.narrative,
+            narrative_rhythm=request.narrative_rhythm
+        )
+        return TextSectionsBatchResponse(sections=sections)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

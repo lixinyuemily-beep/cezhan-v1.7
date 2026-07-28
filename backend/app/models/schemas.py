@@ -278,6 +278,20 @@ class TextSectionResponse(BaseModel):
     content: str = Field(..., description="HTML格式的文本内容")
 
 
+class TextSectionsBatchRequest(BaseModel):
+    """批量生成 Step4 全部文本请求"""
+    exhibition_title: str = Field(..., description="展览标题")
+    sections: List[Dict[str, Any]] = Field(..., description="需要生成的文本段落配置")
+    kept_exhibits: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict, description="各单元已确认展品")
+    narrative: Dict[str, Any] = Field(default_factory=dict, description="叙事方案")
+    narrative_rhythm: Optional[Dict[str, Any]] = Field(None, description="叙事节奏配置")
+
+
+class TextSectionsBatchResponse(BaseModel):
+    """批量生成 Step4 全部文本响应"""
+    sections: List[Dict[str, Any]] = Field(..., description="Step4 文本段落")
+
+
 class OutlineRequest(BaseModel):
     """生成大纲请求"""
     units: List[Dict[str, Any]] = Field(..., description="单元列表")

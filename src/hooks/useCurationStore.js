@@ -48,6 +48,40 @@ const GUEST_USER_ID_STORAGE_KEY = 'curation_guest_user_id';
 
 const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
 
+function parseGeneratedTextContent(rawContent = '') {
+  let content = rawContent || '';
+  let exhibitSummaries = [];
+
+  try {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.intro) {
+        content = `<p>${parsed.intro}</p>`;
+      }
+      if (parsed.exhibits && Array.isArray(parsed.exhibits)) {
+        exhibitSummaries = parsed.exhibits;
+      }
+    }
+  } catch (error) {
+    console.error('解析文本响应失败:', error);
+  }
+
+  return { content, exhibitSummaries };
+}
+
+function buildPendingSection(key, title, exhibits = []) {
+  return {
+    key,
+    title,
+    text: '<p>正在继续生成文本，请稍候…</p>',
+    exhibits,
+    failed: true,
+    autoRepairing: true,
+    edited: false,
+  };
+}
+
 function generateGuestUserId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return `guest_${crypto.randomUUID()}`;
@@ -309,121 +343,102 @@ export function useCurationStore() {
         const activeNarrativeRhythm = currentProject?.llmParams?.narrative_rhythm || narrativeRhythm;
         
         try {
-          const textSectionsData = [];
-          
-          const prefaceUnit = units.find(u => u.tag === '序章');
-          if (prefaceUnit) {
-            try {
-              const response = await retryAsync(
-                () => api.ai.generatePreface(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
-                {
-                  label: 'generate preface',
-                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
-                }
-              );
-              textSectionsData.push({
-                key: 'preface',
-                title: '展览序言',
-                text: response.content,
-                edited: false,
-              });
-            } catch (err) {
-              console.error('生成序言失败:', err);
-              textSectionsData.push({
-                key: 'preface',
-                title: '展览序言',
-                text: '<p>序言生成失败，请手动编辑</p>',
-                failed: true,
-                edited: false,
-              });
-            }
+          const sectionsToGenerate = [];
+
+          if (units.find(u => u.tag === '序章')) {
+            sectionsToGenerate.push({ key: 'preface', title: '展览序言', kind: 'preface' });
           }
-          
-          for (let unitIndex = 0; unitIndex < units.length; unitIndex++) {
-            const unit = units[unitIndex];
-            if (unit.tag === '序章' || unit.tag === '尾声') continue;
-            
-            const regularUnitIndex = units.filter(u => u.tag !== '序章' && u.tag !== '尾声').indexOf(unit);
-            const unitId = String(regularUnitIndex);
-            const unitExhibits = keptExhibits[unitId] || [];
-            
-            try {
-              const response = await retryAsync(
-                () => api.ai.generateTextSection({
-                  unit: unit,
-                  exhibits: unitExhibits,
-                  narrative: narrative,
-                  narrative_rhythm: activeNarrativeRhythm,
-                }),
-                {
-                  label: `generate text section ${unit.title}`,
-                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
-                }
-              );
-              
-              let content = response.content || '';
-              let exhibitSummaries = [];
-              
+
+          regularUnits.forEach((unit, regularUnitIndex) => {
+            const key = String(regularUnitIndex);
+            sectionsToGenerate.push({
+              key,
+              title: unit.title,
+              kind: 'unit',
+              unit,
+              exhibits: convertedKeptExhibits[key] || keptExhibits[key] || [],
+            });
+          });
+
+          if (units.find(u => u.tag === '尾声')) {
+            sectionsToGenerate.push({ key: 'epilogue', title: '展览尾声', kind: 'epilogue' });
+          }
+
+          let textSectionsData = [];
+
+          try {
+            const response = await retryAsync(
+              () => api.ai.generateTextSectionsBatch({
+                exhibition_title: exhibitionTitle,
+                sections: sectionsToGenerate,
+                kept_exhibits: convertedKeptExhibits,
+                narrative,
+                narrative_rhythm: activeNarrativeRhythm,
+              }),
+              {
+                label: 'generate all text sections',
+                retries: 2,
+                delayMs: 1800,
+                shouldRetryResult: (result) => {
+                  const sections = result?.sections || [];
+                  return sections.length !== sectionsToGenerate.length || sections.some(section => !String(section?.text || '').trim() || isFailureText(section?.text));
+                },
+              }
+            );
+            const byKey = Object.fromEntries((response.sections || []).map(section => [String(section.key), section]));
+            textSectionsData = sectionsToGenerate.map(section => ({
+              key: section.key,
+              title: byKey[section.key]?.title || section.title,
+              text: byKey[section.key]?.text || '<p>正在继续生成文本，请稍候…</p>',
+              exhibits: Array.isArray(byKey[section.key]?.exhibits) ? byKey[section.key].exhibits : (section.exhibits || []),
+              failed: !byKey[section.key]?.text || isFailureText(byKey[section.key]?.text),
+              autoRepairing: !byKey[section.key]?.text || isFailureText(byKey[section.key]?.text),
+              edited: false,
+            }));
+          } catch (batchError) {
+            console.error('整套策展文本生成失败，改用单段兜底:', batchError);
+            textSectionsData = [];
+
+            for (const section of sectionsToGenerate) {
               try {
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  const parsed = JSON.parse(jsonMatch[0]);
-                  if (parsed.intro) {
-                    content = `<p>${parsed.intro}</p>`;
-                  }
-                  if (parsed.exhibits && Array.isArray(parsed.exhibits)) {
-                    exhibitSummaries = parsed.exhibits;
-                  }
+                if (section.kind === 'preface') {
+                  const response = await retryAsync(
+                    () => api.ai.generatePreface(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
+                    {
+                      label: 'generate preface',
+                      shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+                    }
+                  );
+                  textSectionsData.push({ key: section.key, title: section.title, text: response.content, exhibits: [], failed: false, autoRepairing: false, edited: false });
+                } else if (section.kind === 'epilogue') {
+                  const response = await retryAsync(
+                    () => api.ai.generateEpilogue(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
+                    {
+                      label: 'generate epilogue',
+                      shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+                    }
+                  );
+                  textSectionsData.push({ key: section.key, title: section.title, text: response.content, exhibits: [], failed: false, autoRepairing: false, edited: false });
+                } else {
+                  const response = await retryAsync(
+                    () => api.ai.generateTextSection({
+                      unit: section.unit,
+                      exhibits: section.exhibits || [],
+                      narrative,
+                      narrative_rhythm: activeNarrativeRhythm,
+                    }),
+                    {
+                      label: `generate text section ${section.title}`,
+                      shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
+                    }
+                  );
+                  const { content, exhibitSummaries } = parseGeneratedTextContent(response.content || '');
+                  textSectionsData.push({ key: section.key, title: section.title, text: content, exhibits: exhibitSummaries, failed: false, autoRepairing: false, edited: false });
                 }
               } catch (e) {
-                console.error('解析文本响应失败:', e);
+                console.error(`生成 "${section.title}" 文本失败，将进入自动修复:`, e);
+                textSectionsData.push(buildPendingSection(section.key, section.title, section.exhibits || []));
               }
-              
-              textSectionsData.push({
-                key: unitId,
-                title: unit.title,
-                text: content,
-                exhibits: exhibitSummaries,
-                edited: false,
-              });
-            } catch (err) {
-              console.error(`生成单元 "${unit.title}" 文本失败:`, err);
-              textSectionsData.push({
-                key: unitId,
-                title: unit.title,
-                text: '<p>文本生成失败，请手动编辑</p>',
-                exhibits: [],
-                failed: true,
-                edited: false,
-              });
-            }
-          }
-          
-          const epilogueUnit = units.find(u => u.tag === '尾声');
-          if (epilogueUnit) {
-            try {
-              const response = await retryAsync(
-                () => api.ai.generateEpilogue(exhibitionTitle, unitCount, narrative, activeNarrativeRhythm),
-                {
-                  label: 'generate epilogue',
-                  shouldRetryResult: (result) => !String(result?.content || '').trim() || isFailureText(result?.content),
-                }
-              );
-              textSectionsData.push({
-                key: 'epilogue',
-                title: '展览尾声',
-                text: response.content,
-                edited: false,
-              });
-            } catch (err) {
-              console.error('生成尾声失败:', err);
-              textSectionsData.push({
-                key: 'epilogue',
-                title: '展览尾声',
-                text: '<p>尾声生成失败，请手动编辑</p>',
-                failed: true,
-                edited: false,
-              });
             }
           }
           
