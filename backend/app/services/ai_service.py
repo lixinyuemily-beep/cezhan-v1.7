@@ -3,6 +3,7 @@ AI 服务 - DeepSeek API 调用 (OpenAI 兼容模式)
 """
 import json
 import re
+import threading
 import time
 from typing import Optional, Dict, List, Any
 from openai import OpenAI
@@ -12,6 +13,8 @@ from .. import prompts
 
 class AIService:
     """DeepSeek AI 服务类 (使用 OpenAI 兼容模式)"""
+
+    _ai_semaphore = threading.BoundedSemaphore(max(1, settings.ai_max_concurrent_requests))
 
     @staticmethod
     def _is_structure_only_unit(unit: Dict[str, Any]) -> bool:
@@ -316,7 +319,13 @@ class AIService:
         return OpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+            timeout=settings.ai_request_timeout_seconds,
         )
+
+    @staticmethod
+    def _log_ai(message: str) -> None:
+        if settings.ai_debug_log_prompts:
+            print(message)
     
     @classmethod
     def chat_completion(
@@ -340,16 +349,26 @@ class AIService:
         Returns:
             包含回复内容的字典
         """
-        client = cls._get_client()
-        resolved_model = model or settings.deepseek_model
-        
-        response = client.chat.completions.create(
-            model=resolved_model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
-        )
+        acquired = cls._ai_semaphore.acquire(timeout=settings.ai_queue_wait_timeout_seconds)
+        if not acquired:
+            raise TimeoutError("AI 服务当前并发较高，请稍后重试。")
+
+        started_at = time.time()
+        try:
+            client = cls._get_client()
+            resolved_model = model or settings.deepseek_model
+
+            response = client.chat.completions.create(
+                model=resolved_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        finally:
+            elapsed = time.time() - started_at
+            print(f"[AI Service] chat_completion finished in {elapsed:.2f}s")
+            cls._ai_semaphore.release()
         
         return {
             "content": response.choices[0].message.content,
@@ -639,10 +658,10 @@ class AIService:
             items_count=max_count
         )
         
-        print(f"[AI Service] ====== SENDING TO AI ======")
-        print(f"System: {system_prompt}")
-        print(f"User: {user_prompt}")
-        print(f"======================================")
+        cls._log_ai(f"[AI Service] ====== SENDING TO AI ======")
+        cls._log_ai(f"System: {system_prompt}")
+        cls._log_ai(f"User: {user_prompt}")
+        cls._log_ai(f"======================================")
         
         result = cls.chat_completion(
             messages=[
@@ -662,8 +681,8 @@ class AIService:
             
             recommendations = json.loads(content.strip())
             
-            print(f"[AI Service] Raw recommendations from AI: {recommendations}")
-            print(f"[AI Service] max_count: {max_count}")
+            cls._log_ai(f"[AI Service] Raw recommendations from AI: {recommendations}")
+            cls._log_ai(f"[AI Service] max_count: {max_count}")
             
             recommended = []
             for rec in recommendations[:max_count]:
@@ -778,13 +797,13 @@ class AIService:
             if future_min > 0 and available_count > unit_items_min:
                 unit_items = min(unit_items, max(unit_items_min, available_count - future_min))
             
-            print(f"[AI Service] Unit {idx}: {unit_theme}, items: {unit_items_min}-{unit_items}")
+            cls._log_ai(f"[AI Service] Unit {idx}: {unit_theme}, items: {unit_items_min}-{unit_items}")
             
             unit_key = str(unit.get('id', idx))
 
             if cls._is_structure_only_unit(unit):
                 recommendations[unit_key] = []
-                print(f"[AI Service] Unit {idx}: skipped because it is {unit.get('tag')}")
+                cls._log_ai(f"[AI Service] Unit {idx}: skipped because it is {unit.get('tag')}")
                 continue
             
             remaining_pool = [ex for i, ex in enumerate(exhibit_pool) if i not in used_indices]
@@ -802,17 +821,17 @@ class AIService:
                 max_count=unit_items
             )
             
-            print(f"[AI Service] Unit {idx}: got {len(unit_recommendations)} recommendations")
+            cls._log_ai(f"[AI Service] Unit {idx}: got {len(unit_recommendations)} recommendations")
             
             unit_exhibits = []
             for rec in unit_recommendations:
                 # 使用 original_index 如果存在，否则使用 exhibit_index
                 exhibit_idx = rec.get('original_index', rec.get('exhibit_index', 0))
-                print(f"[AI Service] Processing rec: {rec}, exhibit_idx={exhibit_idx}, remaining_pool len={len(remaining_pool)}")
+                cls._log_ai(f"[AI Service] Processing rec: exhibit_idx={exhibit_idx}, remaining_pool len={len(remaining_pool)}")
                 # 直接从 remaining_pool 获取展品
                 if 0 < exhibit_idx <= len(remaining_pool):
                     ex = remaining_pool[exhibit_idx - 1]
-                    print(f"[AI Service] Got exhibit: {cls._get_exhibit_name(ex)}")
+                    cls._log_ai(f"[AI Service] Got exhibit: {cls._get_exhibit_name(ex)}")
                     fallback_score = cls._score_exhibit_for_unit(ex, unit_theme, unit_desc, narrative)
                     append_exhibit(
                         unit_exhibits,
@@ -823,7 +842,7 @@ class AIService:
                         fallback_score=fallback_score,
                     )
                 else:
-                    print(f"[AI Service] Index out of range! exhibit_idx={exhibit_idx}, remaining_pool len={len(remaining_pool)}")
+                    cls._log_ai(f"[AI Service] Index out of range! exhibit_idx={exhibit_idx}, remaining_pool len={len(remaining_pool)}")
 
             # AI 偶发少给、空给或给相似展品时，用代码按相关性补齐到下限。
             target_min = min(unit_items_min, unit_items, len(exhibit_pool) - len(used_indices) + len(unit_exhibits))
@@ -856,12 +875,12 @@ class AIService:
                     )
             
             recommendations[unit_key] = unit_exhibits
-            print(f"[AI Service] Unit {idx}: final unit_exhibits count = {len(unit_exhibits)}")
+            cls._log_ai(f"[AI Service] Unit {idx}: final unit_exhibits count = {len(unit_exhibits)}")
         
         leftovers = [ex for i, ex in enumerate(exhibit_pool) if i not in used_indices]
         
-        print(f"[AI Service] Final recommendations: {recommendations}")
-        print(f"[AI Service] used_indices count: {len(used_indices)}, total exhibits: {len(exhibit_pool)}, leftovers count: {len(leftovers)}")
+        cls._log_ai(f"[AI Service] Final recommendations: {recommendations}")
+        print(f"[AI Service] recommendations done: used_indices={len(used_indices)}, total_exhibits={len(exhibit_pool)}, leftovers={len(leftovers)}")
         
         return {
             "recommendations": recommendations,

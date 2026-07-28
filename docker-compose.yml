@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # 2 个 uvicorn worker 下，每个进程最多 3 个 AI 请求，总体约 5-6 个并发。
+      AI_MAX_CONCURRENT_REQUESTS: ${AI_MAX_CONCURRENT_REQUESTS:-3}
+      AI_QUEUE_WAIT_TIMEOUT_SECONDS: ${AI_QUEUE_WAIT_TIMEOUT_SECONDS:-60}
+      AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-240}
+      AI_DEBUG_LOG_PROMPTS: ${AI_DEBUG_LOG_PROMPTS:-false}
+    volumes:
+      - backend_storage:/app/storage
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  backend_storage:
+  caddy_data:
+  caddy_config:

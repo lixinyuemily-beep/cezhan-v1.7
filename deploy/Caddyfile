@@ -1,0 +1,4 @@
+cezhanzhushou.com, www.cezhanzhushou.com {
+    encode zstd gzip
+    reverse_proxy web:80
+}
