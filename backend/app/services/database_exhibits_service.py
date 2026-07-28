@@ -18,6 +18,11 @@ class ExhibitsDatabaseService(DatabaseClientProvider):
         )
 
     @classmethod
+    def _normalize_key_text(cls, value: Optional[str]) -> str:
+        normalized = cls._normalize_search_text(value)
+        return "" if normalized in {"-", "—", "无", "暂无", "null", "none", "undefined"} else normalized
+
+    @classmethod
     def _get_search_text(cls, exhibit: Dict) -> str:
         return " ".join(
             text for text in [
@@ -42,9 +47,11 @@ class ExhibitsDatabaseService(DatabaseClientProvider):
 
     @classmethod
     def get_deduplication_key(cls, exhibit: Dict) -> str:
+        # 图片上传后会生成新的存储 URL，同一展品重复导入时 URL 不稳定；
+        # 去重以用户可感知的展品语义字段为准。
         return "|".join(
-            cls._normalize_search_text(exhibit.get(field))
-            for field in ("name", "time", "place", "material", "introduction", "image_url", "other")
+            cls._normalize_key_text(exhibit.get(field))
+            for field in ("name", "time", "place", "material", "introduction", "other")
         )
 
     @classmethod
@@ -82,7 +89,8 @@ class ExhibitsDatabaseService(DatabaseClientProvider):
         query = client.table(settings.table_exhibits).select("*")
         if user_id:
             query = query.eq("user_id", user_id)
-        return query.order("created_at", desc=True).execute().data or []
+        exhibits = query.order("created_at", desc=True).execute().data or []
+        return cls.deduplicate_exhibits(exhibits)
 
     @classmethod
     def search_exhibits(cls, keyword: str, user_id: Optional[str] = None) -> List[Dict]:

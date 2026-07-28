@@ -52,16 +52,22 @@ export function normalizeExhibitText(value) {
     .toLowerCase();
 }
 
+export function normalizeExhibitKeyText(value) {
+  const normalized = normalizeExhibitText(value);
+  return ['-', '—', '无', '暂无', 'null', 'none', 'undefined'].includes(normalized) ? '' : normalized;
+}
+
 export function getExhibitDeduplicationKey(exhibit = {}) {
+  // 图片会被上传到存储服务并生成不同 URL，同一展品重复导入时图片 URL 不稳定；
+  // 去重以用户可感知的展品语义字段为准。
   return [
     getExhibitName(exhibit),
     getExhibitTime(exhibit),
     getExhibitPlace(exhibit),
     getExhibitMaterial(exhibit),
     getExhibitIntroduction(exhibit),
-    getExhibitFullImageUrl(exhibit),
     getExhibitOther(exhibit),
-  ].map(normalizeExhibitText).join('|');
+  ].map(normalizeExhibitKeyText).join('|');
 }
 
 export function deduplicateExhibits(exhibits = []) {
