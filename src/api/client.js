@@ -5,6 +5,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const EXHIBIT_PARSE_START_TIMEOUT = 30 * 60 * 1000;
 const EXHIBIT_PARSE_POLL_INTERVAL_MS = 1200;
 const AI_GENERATION_TIMEOUT = 3 * 60 * 1000;
+const AI_UNITS_GENERATION_TIMEOUT = 3 * 60 * 1000;
 const AI_BATCH_GENERATION_TIMEOUT = 5 * 60 * 1000;
 const AUTH_STORAGE_KEY = 'curation_auth_session';
 
@@ -44,7 +45,17 @@ apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.code === 'ECONNABORTED') {
-      return Promise.reject(new Error('请求超时，请稍后重试；如果上传的是带大量图片的 Excel，请尽量控制文件大小。'));
+      const url = String(error.config?.url || '');
+      if (url.includes('/ai/units')) {
+        return Promise.reject(new Error('单元结构生成超时，请稍后重试；如果展品较多，请减少单次展品数量或稍后再试。'));
+      }
+      if (url.includes('/exhibits/parse-template')) {
+        return Promise.reject(new Error('展品清单解析超时，请稍后重试；如果上传的是带大量图片的 Excel，请尽量控制文件大小。'));
+      }
+      if (url.includes('/ai/')) {
+        return Promise.reject(new Error('AI 生成超时，请稍后重试。'));
+      }
+      return Promise.reject(new Error('请求超时，请稍后重试。'));
     }
     if (error.response?.status !== 404) {
       const message = error.response?.data?.detail || error.message || '请求失败';
@@ -138,7 +149,7 @@ export const api = {
   
   ai: {
     generateNarrative: (data) => apiClient.post('/ai/narrative', data),
-    generateUnits: (data) => apiClient.post('/ai/units', data),
+    generateUnits: (data) => apiClient.post('/ai/units', data, { timeout: AI_UNITS_GENERATION_TIMEOUT }),
     recommendExhibits: (data) => apiClient.post('/ai/recommend', data),
     recommendExhibitsBatch: (data) => apiClient.post('/ai/recommend-batch', data),
     generateTextSectionsBatch: (data) => apiClient.post('/ai/text-sections-batch', data, { timeout: AI_BATCH_GENERATION_TIMEOUT }),
