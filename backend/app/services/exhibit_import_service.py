@@ -4,7 +4,9 @@
 import asyncio
 import csv
 import io
+import json
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
@@ -38,8 +40,43 @@ class ExhibitImportService:
         return Path(settings.exhibit_import_temp_dir)
 
     @classmethod
+    def _task_state_root(cls) -> Path:
+        return cls._temp_root() / "_task_states"
+
+    @classmethod
+    def _task_state_path(cls, task_id: str) -> Path:
+        return cls._task_state_root() / f"{task_id}.json"
+
+    @classmethod
     def _ensure_storage_dirs(cls) -> None:
         cls._temp_root().mkdir(parents=True, exist_ok=True)
+        cls._task_state_root().mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def _write_task_state(cls, task: Dict[str, Any]) -> None:
+        cls._ensure_storage_dirs()
+        task_id = str(task.get("task_id") or "").strip()
+        if not task_id:
+            return
+        state_path = cls._task_state_path(task_id)
+        tmp_path = state_path.with_suffix(".json.tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(task, f, ensure_ascii=False, default=str)
+        tmp_path.replace(state_path)
+
+    @classmethod
+    def _read_task_state(cls, task_id: str) -> Dict[str, Any] | None:
+        state_path = cls._task_state_path(task_id)
+        if not state_path.exists():
+            return None
+        try:
+            with state_path.open("r", encoding="utf-8") as f:
+                task = json.load(f)
+            if isinstance(task, dict):
+                return task
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def _normalize_header(value) -> str:
@@ -111,19 +148,25 @@ class ExhibitImportService:
     @classmethod
     async def _update_task(cls, task_id: str, **updates: Any) -> None:
         async with cls._task_lock:
-            task = cls._tasks.get(task_id)
+            task = cls._tasks.get(task_id) or cls._read_task_state(task_id)
             if not task:
                 return
+            updates["updated_at"] = time.time()
             task.update(updates)
+            cls._tasks[task_id] = task
+            cls._write_task_state(task)
 
     @classmethod
     async def get_parse_task(cls, task_id: str, user_id: str) -> Dict[str, Any]:
         async with cls._task_lock:
-            task = cls._tasks.get(task_id)
+            # 多 worker 部署时，创建任务和轮询任务可能落在不同进程。
+            # 因此每次优先读取共享磁盘状态，避免只查当前进程内存导致误报 404。
+            task = cls._read_task_state(task_id) or cls._tasks.get(task_id)
             if not task:
                 raise HTTPException(status_code=404, detail="解析任务不存在或已过期。")
             if task.get("user_id") != user_id:
                 raise HTTPException(status_code=403, detail="不能访问其他用户的解析任务。")
+            cls._tasks[task_id] = task
             return dict(task)
 
     @classmethod
@@ -176,9 +219,12 @@ class ExhibitImportService:
             },
             "result": None,
             "error": None,
+            "created_at": time.time(),
+            "updated_at": time.time(),
         }
         async with cls._task_lock:
             cls._tasks[task_id] = task
+            cls._write_task_state(task)
 
         asyncio.create_task(cls._process_task(task_id, source_path, filename, user_id))
         return task
