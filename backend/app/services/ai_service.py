@@ -521,7 +521,42 @@ class AIService:
             return f"第{index}单元"
 
         expected_tags = ["序章"] + [regular_tag(i + 1) for i in range(max(unit_count, 0))] + ["尾声"]
-        last_error: Optional[Exception] = None
+
+        def compact_text(value: str, limit: int = 28) -> str:
+            text = re.sub(r"\s+", "", str(value or "")).strip("，。；;、")
+            return text[:limit]
+
+        def fallback_unit_title(index: int, source: Dict[str, Any], expected_tag: str) -> str:
+            if expected_tag in {"序章", "尾声"}:
+                return expected_tag
+
+            title_text = compact_text(source.get("title") or "")
+            generic_titles = {
+                "",
+                expected_tag,
+                "单元标题",
+                "主题单元",
+                "核心展示",
+                "文化解读",
+                "开篇",
+                "总结",
+            }
+            if title_text and title_text not in generic_titles:
+                return title_text
+
+            for key in ("theme", "description", "narrative", "desc"):
+                candidate = compact_text(source.get(key) or "")
+                if candidate and candidate not in generic_titles:
+                    return candidate[:18]
+
+            narrative_title = compact_text(narrative.get("title") or "策展单元")
+            return f"{narrative_title} · {index}"
+
+        def fallback_item_count(index: int) -> int:
+            if unit_count <= 0:
+                return 0
+            base = max(1, int(round(exhibit_count / unit_count)))
+            return base
 
         result = cls.chat_completion(
             messages=[
@@ -575,7 +610,11 @@ class AIService:
                     continue
 
             if not isinstance(parsed_units, list):
-                raise ValueError("units response is not a valid JSON array")
+                print(
+                    "[AI Service] units parse fallback: response is not a JSON array; "
+                    f"content_prefix={content[:240]!r}"
+                )
+                parsed_units = []
 
             normalized_units: List[Dict[str, Any]] = []
 
@@ -594,7 +633,6 @@ class AIService:
                     or source.get("desc")
                     or ""
                 ).strip()
-                title_text = str(source.get("title") or "").strip()
 
                 fallback_titles = {
                     "序章": "序章",
@@ -607,26 +645,34 @@ class AIService:
 
                 normalized_unit: Dict[str, Any] = {
                     "tag": expected_tag,
-                    "title": title_text or fallback_titles.get(expected_tag, expected_tag),
+                    "title": fallback_unit_title(index, source, expected_tag) or fallback_titles.get(expected_tag, expected_tag),
                     "description": description_text or narrative_text or fallback_narratives.get(expected_tag, ""),
                     "narrative": narrative_text or description_text or fallback_narratives.get(expected_tag, ""),
                     "theme": str(source.get("theme") or "").strip(),
                 }
 
                 if not is_structure_only:
-                    normalized_unit["items"] = int(source.get("items") or 0)
+                    try:
+                        normalized_unit["items"] = int(source.get("items") or 0) or fallback_item_count(index)
+                    except Exception:
+                        normalized_unit["items"] = fallback_item_count(index)
 
                 normalized_units.append(normalized_unit)
 
-            main_units = [u for u in normalized_units if u.get("tag") not in {"序章", "尾声"}]
-            if not main_units or any(not str(u.get("title") or "").strip() or str(u.get("title") or "").strip() == str(u.get("tag") or "").strip() for u in main_units):
-                raise ValueError("units response does not contain meaningful unit titles")
-
             return normalized_units
         except Exception as e:
-            last_error = e
-
-        raise ValueError(f"单元结构生成失败：模型未返回有效的单元结构，请重试。{f' 最后一次错误：{last_error}' if last_error else ''}")
+            print(f"[AI Service] units normalize fallback: {e}")
+            return [
+                {
+                    "tag": expected_tag,
+                    "title": fallback_unit_title(index, {}, expected_tag),
+                    "description": "该单元结构由系统根据当前叙事方向临时生成，可在页面中继续编辑优化。",
+                    "narrative": "承接整体叙事，组织对应展品线索。",
+                    **({} if expected_tag in {"序章", "尾声"} else {"items": fallback_item_count(index)}),
+                    "theme": "",
+                }
+                for index, expected_tag in enumerate(expected_tags)
+            ]
     
     @classmethod
     def recommend_exhibits(
