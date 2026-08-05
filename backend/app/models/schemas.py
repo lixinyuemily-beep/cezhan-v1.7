@@ -172,6 +172,15 @@ class ExhibitResponse(ExhibitBase):
         from_attributes = True
 
 
+class ExhibitBatchCreateResponse(BaseModel):
+    """批量创建展品响应"""
+    exhibits: List[ExhibitResponse] = Field(default_factory=list, description="本次新写入的展品")
+    created_count: int = Field(0, description="本次新写入展品数")
+    duplicate_count: int = Field(0, description="因已存在而跳过的展品数")
+    input_duplicate_count: int = Field(0, description="本次上传文件内部重复而跳过的展品数")
+    total_count: int = Field(0, description="请求提交的展品总数")
+
+
 # ==================== 文本段落模型 ====================
 
 class TextSectionBase(BaseModel):

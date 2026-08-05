@@ -116,17 +116,36 @@ export const Topbar = ({
     <header style={{
       position: 'fixed', top: 0, left: 232, right: 0, height: 52,
       background: C.bgElevated || C.bgSecondary, borderBottom: `1px solid ${C.border}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
       zIndex: 99, padding: '0 28px',
       backdropFilter: 'blur(14px)',
       boxShadow: '0 4px 20px rgba(16, 24, 40, 0.04)',
     }}>
-      <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: '0.02em' }}>
+      <span style={{
+        fontSize: 12,
+        color: C.textSecondary,
+        letterSpacing: '0.02em',
+        flex: '0 1 28%',
+        minWidth: 120,
+        maxWidth: 360,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
         {topbarTitle}
       </span>
 
       {isOnStepPage && (
-        <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 0 }}>
+        <div style={{
+          flex: '1 1 520px',
+          minWidth: 420,
+          maxWidth: 760,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 0,
+          padding: '0 8px',
+        }}>
           {STEPS.map((label, i) => {
             const n = i + 1;
             const isActive = n === currentStep;
@@ -158,7 +177,7 @@ export const Topbar = ({
                 </div>
                 {i < STEPS.length - 1 && (
                   <div style={{
-                    width: 100, height: 2, margin: '0 4px', marginTop: -10,
+                    width: 84, height: 2, margin: '0 4px', marginTop: -10,
                     background: n < completedStep ? C.success : C.stepInactive,
                     transition: 'background 0.2s',
                   }} />
@@ -169,7 +188,7 @@ export const Topbar = ({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flex: '0 0 auto', minWidth: 260 }}>
         {isOnStepPage && <span style={{ fontSize: 12, color: C.success, fontWeight: 600 }}>✓ 已自动保存</span>}
         {isOnStepPage && (
           <Btn

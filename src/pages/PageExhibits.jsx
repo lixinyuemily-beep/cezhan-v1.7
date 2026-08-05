@@ -284,21 +284,27 @@ export const PageExhibits = ({
         })),
         { user_id: activeUserId }
       );
+      const batchResult = Array.isArray(created)
+        ? { exhibits: created, created_count: created.length, duplicate_count: 0, input_duplicate_count: 0 }
+        : (created || {});
+      const createdCount = Number(batchResult.created_count ?? batchResult.exhibits?.length ?? 0);
+      const backendDuplicateCount = Number(batchResult.duplicate_count || 0) + Number(batchResult.input_duplicate_count || 0);
+      const totalDuplicateCount = duplicateInFileCount + duplicateInLibraryCount + backendDuplicateCount;
 
       setImportSummary({
-        importedCount: created.length,
+        importedCount: createdCount,
         skippedBlankRows: Number(parsed.meta?.skipped_blank_rows || 0),
         incompleteRowCount: Number(parsed.meta?.incomplete_row_count || 0),
         incompleteRows: parsed.meta?.incomplete_rows || [],
-        duplicateInFileCount,
-        duplicateInLibraryCount,
+        duplicateInFileCount: duplicateInFileCount + Number(batchResult.input_duplicate_count || 0),
+        duplicateInLibraryCount: duplicateInLibraryCount + Number(batchResult.duplicate_count || 0),
         fileName: parsed.file_name || file.name,
       });
-      const duplicateText = duplicateInFileCount + duplicateInLibraryCount > 0
-        ? `，已跳过重复 ${duplicateInFileCount + duplicateInLibraryCount} 条`
+      const duplicateText = totalDuplicateCount > 0
+        ? `，已跳过重复 ${totalDuplicateCount} 条`
         : '';
       showToast(
-        `成功导入 ${created.length} 条展品${duplicateText}${Number(parsed.meta?.incomplete_row_count || 0) > 0 ? `，其中 ${Number(parsed.meta?.incomplete_row_count || 0)} 行信息不全` : ''}`,
+        `成功导入 ${createdCount} 条展品${duplicateText}${Number(parsed.meta?.incomplete_row_count || 0) > 0 ? `，其中 ${Number(parsed.meta?.incomplete_row_count || 0)} 行信息不全` : ''}`,
         Number(parsed.meta?.incomplete_row_count || 0) > 0 ? 'info' : 'success'
       );
       loadExhibits();

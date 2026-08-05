@@ -676,13 +676,25 @@ export const PageP1 = ({
             })),
             { user_id: activeUserId }
           );
-          const savedExhibits = (created || []).map(normalizeImportedExhibit);
+          const batchResult = Array.isArray(created)
+            ? { exhibits: created, created_count: created.length, duplicate_count: 0, input_duplicate_count: 0, total_count: parsedExhibits.length }
+            : (created || {});
+          const savedExhibits = (batchResult.exhibits || []).map(normalizeImportedExhibit);
+          const createdCount = Number(batchResult.created_count ?? savedExhibits.length ?? 0);
+          const duplicateCount = Number(batchResult.duplicate_count || 0);
+          const inputDuplicateCount = Number(batchResult.input_duplicate_count || 0);
+          const skippedCount = duplicateCount + inputDuplicateCount;
           exhibitsForFlow = savedExhibits.length > 0 ? savedExhibits : parsedExhibits;
           setKnowledgeExhibits((prev) => [...savedExhibits, ...prev]);
+          const duplicateReason = skippedCount > 0
+            ? `；${skippedCount} 件未重复写入，其中 ${duplicateCount} 件已存在于历史展品库${inputDuplicateCount > 0 ? `，${inputDuplicateCount} 件为本次文件内重复` : ''}`
+            : '';
           setLibrarySaveSummary({
             status: 'success',
-            count: savedExhibits.length,
-            message: `已同步 ${savedExhibits.length} 件展品到展品库`,
+            count: createdCount,
+            message: createdCount > 0
+              ? `已新增 ${createdCount} 件展品到展品库${duplicateReason}`
+              : `本次未新增展品到展品库，因为这些展品已存在于历史展品库${inputDuplicateCount > 0 ? `，且有 ${inputDuplicateCount} 件为本次文件内重复` : ''}`,
           });
         } catch (saveError) {
           console.error('同步展品库失败:', saveError);
@@ -1024,7 +1036,6 @@ export const PageP1 = ({
               <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 4 }}>
                 解析结果：成功导入 {Number(parseMeta.imported_count || uploadedExhibits.length || 0)} 条，文件大小 {(Number(parseMeta.file_size || 0) / 1024 / 1024).toFixed(2)} MB
                 {Number(parseMeta.embedded_image_count || 0) > 0 ? `，处理嵌入图片 ${parseMeta.embedded_image_count} 张` : ''}
-                {Number(parseMeta.skipped_blank_rows || 0) > 0 ? `，跳过空白行 ${parseMeta.skipped_blank_rows} 行` : ''}
                 {Number(parseMeta.incomplete_row_count || 0) > 0 ? `，信息不全 ${parseMeta.incomplete_row_count} 行` : ''}
               </div>
             )}

@@ -106,15 +106,39 @@ export const PageStep4 = ({
 
   const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
 
-  const parseTextSectionContent = (rawContent = '') => {
-    let content = rawContent || '';
+  const parseTextSectionContent = (rawContent = '', sectionKey = '') => {
+    const originalContent = String(rawContent || '').trim();
+    let content = originalContent;
     let exhibitSummaries = [];
     let summary = '';
+    let parsedJson = null;
 
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
+        parsedJson = parsed;
+        if (Array.isArray(parsed.sections)) {
+          const currentSection = parsed.sections.find(section => String(section?.key) === String(sectionKey));
+          if (!currentSection) {
+            return {
+              text: '<p>文本生成失败，正在继续生成文本，请稍候。</p>',
+              exhibits: [],
+              failed: true,
+              error: '模型返回了整套文本，但缺少当前单元内容',
+            };
+          }
+          content = String(currentSection.text || currentSection.content || '').trim();
+          exhibitSummaries = Array.isArray(currentSection.exhibits) ? currentSection.exhibits : [];
+          if (!content) {
+            return {
+              text: '<p>文本生成失败，正在继续生成文本，请稍候。</p>',
+              exhibits: exhibitSummaries,
+              failed: true,
+              error: '当前单元文本为空',
+            };
+          }
+        }
         if (parsed.intro) {
           content = `<p>${parsed.intro}</p>`;
         }
@@ -127,6 +151,26 @@ export const PageStep4 = ({
       }
     } catch (e) {
       console.error('解析文本响应失败:', e);
+    }
+
+    if (parsedJson && Array.isArray(parsedJson.sections) && content === originalContent) {
+      return {
+        text: '<p>文本生成失败，正在继续生成文本，请稍候。</p>',
+        exhibits: [],
+        failed: true,
+        error: '模型返回了整套文本，未能匹配当前单元',
+      };
+    }
+    if (/^\s*[{[]/.test(content) && /"(sections|intro|exhibits|desc|name)"\s*:/.test(content)) {
+      return {
+        text: '<p>文本生成失败，正在继续生成文本，请稍候。</p>',
+        exhibits: exhibitSummaries,
+        failed: true,
+        error: '模型返回格式异常，已隐藏原始 JSON',
+      };
+    }
+    if (content && !content.startsWith('<')) {
+      content = `<p>${content}</p>`;
     }
 
     return { text: content + summary, exhibits: exhibitSummaries };
@@ -236,7 +280,7 @@ export const PageStep4 = ({
       }
     );
 
-    return parseTextSectionContent(response.content || '');
+    return parseTextSectionContent(response.content || '', sectionKey);
   };
 
   useEffect(() => {
@@ -274,7 +318,7 @@ export const PageStep4 = ({
         if (cancelled) return;
         const nextTextSections = (textSections || []).map((item) =>
           item.key === section.key
-            ? { ...item, text: generated.text, exhibits: generated.exhibits, edited: false, failed: false, autoRepairing: false, error: '' }
+            ? { ...item, text: generated.text, exhibits: generated.exhibits, edited: false, failed: !!generated.failed, autoRepairing: !!generated.failed, error: generated.error || '' }
             : item
         );
         setTextSections(nextTextSections);
@@ -390,7 +434,7 @@ export const PageStep4 = ({
 
       const nextTextSections = textSections.map(s =>
         s.key === sectionKey
-          ? { ...s, text: generated.text, exhibits: generated.exhibits, edited: false, failed: false, error: '' }
+          ? { ...s, text: generated.text, exhibits: generated.exhibits, edited: false, failed: !!generated.failed, autoRepairing: !!generated.failed, error: generated.error || '' }
           : s
       );
       setTextSections(nextTextSections);

@@ -4,7 +4,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
 from ..models.schemas import (
-    ExhibitCreate, ExhibitUpdate, ExhibitResponse, MessageResponse
+    ExhibitCreate, ExhibitUpdate, ExhibitResponse, ExhibitBatchCreateResponse, MessageResponse
 )
 from ..services.database_exhibits_service import exhibits_db
 from ..services.exhibit_import_service import exhibit_import_service
@@ -211,7 +211,7 @@ async def delete_exhibit(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/batch", response_model=List[ExhibitResponse])
+@router.post("/batch", response_model=ExhibitBatchCreateResponse)
 async def create_exhibits_batch(
     exhibits: List[ExhibitCreate],
     user_id: Optional[str] = Query(None, description="用户ID"),
@@ -221,21 +221,35 @@ async def create_exhibits_batch(
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
         created = []
+        duplicate_count = 0
+        input_duplicate_count = 0
         existing_keys = {
             exhibits_db.get_deduplication_key(exhibit)
             for exhibit in exhibits_db.get_all_exhibits(effective_user_id)
         }
+        seen_input_keys = set()
         for exhibit in exhibits:
             exhibit_data = exhibit.model_dump()
             exhibit_data["user_id"] = effective_user_id
             deduplication_key = exhibits_db.get_deduplication_key(exhibit_data)
+            if deduplication_key in seen_input_keys:
+                input_duplicate_count += 1
+                continue
+            seen_input_keys.add(deduplication_key)
             if deduplication_key in existing_keys:
+                duplicate_count += 1
                 continue
             new_exhibit = exhibits_db.create_exhibit(exhibit_data)
             if new_exhibit:
                 existing_keys.add(deduplication_key)
                 created.append(new_exhibit)
-        return created
+        return ExhibitBatchCreateResponse(
+            exhibits=created,
+            created_count=len(created),
+            duplicate_count=duplicate_count,
+            input_duplicate_count=input_duplicate_count,
+            total_count=len(exhibits),
+        )
     except HTTPException:
         raise
     except Exception as e:

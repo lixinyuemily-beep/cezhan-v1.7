@@ -4,7 +4,7 @@
 from .schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse,
     UnitCreate, UnitUpdate, UnitResponse,
-    ExhibitCreate, ExhibitUpdate, ExhibitResponse,
+    ExhibitCreate, ExhibitUpdate, ExhibitResponse, ExhibitBatchCreateResponse,
     TextSectionCreate, TextSectionUpdate, TextSectionResponse,
     NarrativeRequest, NarrativeResponse,
     UnitsRequest, UnitsResponse,
