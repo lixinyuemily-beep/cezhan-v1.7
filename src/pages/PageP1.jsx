@@ -1435,13 +1435,25 @@ export const PageP1 = ({
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400,
+          padding: 24,
         }}>
-          <div style={{ background: C.bgSecondary, borderRadius: 12, padding: 24, width: 700, maxHeight: "80vh", overflow: "auto" }}>
+          <div style={{
+            background: C.bgSecondary,
+            borderRadius: 12,
+            padding: 24,
+            width: 760,
+            maxWidth: "calc(100vw - 48px)",
+            height: "min(760px, calc(100vh - 72px))",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: C.shadowLg,
+          }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: C.textPrimary }}>展品清单</h3>
             <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
               共解析到 <span style={{ color: C.accentPrimary, fontWeight: 700 }}>{uploadedExhibits.length}</span> 件展品
             </div>
-            <div style={{ maxHeight: 400, overflow: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: C.bgPrimary, borderBottom: `1px solid ${C.border}` }}>
@@ -1455,7 +1467,7 @@ export const PageP1 = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {uploadedExhibits.slice(0, 20).map((ex, i) => (
+                  {uploadedExhibits.map((ex, i) => (
                     <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                       <td style={{ padding: "10px 12px", color: C.textSecondary }}>{i + 1}</td>
                       <td style={{ padding: "10px 12px" }}>
@@ -1478,13 +1490,8 @@ export const PageP1 = ({
                   ))}
                 </tbody>
               </table>
-              {uploadedExhibits.length > 20 && (
-                <div style={{ padding: 12, textAlign: "center", color: C.textSecondary, fontSize: 12, background: C.bgPrimary }}>
-                  ... 还有 {uploadedExhibits.length - 20} 件展品
-                </div>
-              )}
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16, flexShrink: 0 }}>
               <Btn onClick={() => setShowPreviewModal(false)}>关闭</Btn>
             </div>
           </div>
