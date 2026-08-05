@@ -547,12 +547,28 @@ class AIService:
             if list_start != -1 and list_end != -1 and list_end > list_start:
                 candidates.append(content[list_start:list_end + 1].strip())
 
+            def extract_units(value: Any) -> Optional[List[Dict[str, Any]]]:
+                if isinstance(value, list):
+                    return value
+                if not isinstance(value, dict):
+                    return None
+                for key in ("units", "data", "result", "items", "sections"):
+                    nested = value.get(key)
+                    if isinstance(nested, list):
+                        return nested
+                    if isinstance(nested, dict):
+                        extracted = extract_units(nested)
+                        if extracted:
+                            return extracted
+                return None
+
             parsed_units = None
             for candidate in candidates:
                 if not candidate:
                     continue
                 try:
-                    parsed_units = json.loads(candidate)
+                    parsed = json.loads(candidate)
+                    parsed_units = extract_units(parsed)
                     if isinstance(parsed_units, list):
                         break
                 except Exception:

@@ -19,6 +19,7 @@ export const PageStep1 = ({
   setUnits,
   generateStep2Data,
   llmParams,
+  showToast,
   theme,
 }) => {
   const C = theme;
@@ -26,6 +27,7 @@ export const PageStep1 = ({
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customTitle, setCustomTitle] = useState('');
   const [customLogic, setCustomLogic] = useState('');
+  const [generationError, setGenerationError] = useState('');
 
   const plans = currentProject?.narrativeOptions || [
     { label: "方案 A", title: "未生成方案",
@@ -57,13 +59,13 @@ export const PageStep1 = ({
 
   const handleConfirm = async () => {
     if (!currentProject || !currentProject.llmParams) {
-      alert('请先创建项目');
+      showToast?.('请先创建项目', 'warning');
       return;
     }
 
     const selectedPlan = hasSelectedNarrative ? currentProject.narrativeOptions?.[selectedNarrative] : null;
     if (!selectedPlan) {
-      alert('请先选择一个叙事方向');
+      showToast?.('请先选择一个叙事方向', 'info');
       return;
     }
 
@@ -87,6 +89,7 @@ export const PageStep1 = ({
       }
     }
 
+    setGenerationError('');
     setIsGenerating(true);
 
     try {
@@ -119,11 +122,15 @@ export const PageStep1 = ({
         setCurrentStep(2);
         setCurrentPage('step2');
       } else {
-        alert(result.error || '生成失败，请重试');
+        const message = result.error || '生成失败，请重试';
+        setGenerationError(message);
+        showToast?.(message, 'error', 5000);
       }
     } catch (error) {
       console.error('生成失败:', error);
-      alert('生成失败，请重试');
+      const message = error.message || '生成失败，请重试';
+      setGenerationError(message);
+      showToast?.(message, 'error', 5000);
     } finally {
       setIsGenerating(false);
     }
@@ -381,6 +388,20 @@ export const PageStep1 = ({
             {isGenerating ? '正在生成单元结构...' : '确认方向，进入下一步 →'}
           </Btn>
         </div>
+        {generationError && (
+          <div style={{
+            flexBasis: '100%',
+            marginTop: 4,
+            padding: '10px 12px',
+            borderRadius: 12,
+            background: `${C.danger || '#B91C1C'}10`,
+            color: C.danger || '#B91C1C',
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}>
+            {generationError}
+          </div>
+        )}
       </div>
 
       {isGenerating && (
