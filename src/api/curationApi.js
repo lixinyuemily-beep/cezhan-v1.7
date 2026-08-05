@@ -180,7 +180,7 @@ export async function generateUnitStructure(params) {
     const message = String(error?.message || "").trim();
     return {
       success: false,
-      error: message || "单元结构生成失败，请重试",
+      error: message || "单元结构生成失败：AI 未返回合格结构，请重新生成本步",
     };
   }
 }

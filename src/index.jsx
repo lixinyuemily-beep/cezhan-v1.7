@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useCurationStore } from "./hooks";
-import { api } from "./api/client";
+import { api, getReadableApiError } from "./api/client";
 import { Sidebar, Topbar } from "./components/layout";
 import { ToastProvider } from "./components/ui/Toast";
 import { PageP0, PageP1, PageExhibits, PageSettings, PageHelp, PageStep1, PageStep2, PageStep3, PageStep4, PageStep5 } from "./pages";
@@ -43,7 +43,7 @@ function CurationApp() {
         });
       } catch (error) {
         console.error('后端连接失败:', error);
-        store.showToast('网络连接不稳定，正在尝试恢复；如果持续出现，请刷新页面。', 'error');
+        store.showToast(getReadableApiError(error, '后端健康检查失败'), 'error');
       }
     };
     checkBackend();
@@ -111,7 +111,7 @@ function CurationApp() {
         setCompletedProjects(completed);
       } catch (error) {
         console.error('加载项目失败:', error);
-        store.showToast(error?.message || '项目数据加载失败，请稍后刷新重试。', 'error');
+        store.showToast(getReadableApiError(error, '项目数据加载失败'), 'error');
       }
     };
 

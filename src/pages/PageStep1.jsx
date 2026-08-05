@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
 import { generateUnitStructure } from '../api/curationApi';
-import { api } from '../api/client';
+import { api, getReadableApiError } from '../api/client';
 
 export const PageStep1 = ({
   navigateTo,
@@ -122,13 +122,13 @@ export const PageStep1 = ({
         setCurrentStep(2);
         setCurrentPage('step2');
       } else {
-        const message = result.error || '生成失败，请重试';
+        const message = result.error || '单元结构生成失败：请重新生成本步';
         setGenerationError(message);
         showToast?.(message, 'error', 5000);
       }
     } catch (error) {
       console.error('生成失败:', error);
-      const message = error.message || '生成失败，请重试';
+      const message = getReadableApiError(error, '单元结构生成失败');
       setGenerationError(message);
       showToast?.(message, 'error', 5000);
     } finally {

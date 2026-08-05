@@ -17,6 +17,17 @@ const apiClient = axios.create({
   },
 });
 
+export function getReadableApiError(error, fallback = '请求失败') {
+  const raw = String(error?.message || '').trim();
+  if (error?.code === 'ECONNABORTED' || /timeout|超时/i.test(raw)) {
+    return `${fallback}：请求超时，请稍后重试`;
+  }
+  if (/Network Error/i.test(raw)) {
+    return `${fallback}：网络连接失败，可能是当前网络不稳定或服务器暂时无响应`;
+  }
+  return raw ? `${fallback}：${raw}` : fallback;
+}
+
 function readStoredAuthSession() {
   if (typeof localStorage === 'undefined') return null;
   const saved = localStorage.getItem(AUTH_STORAGE_KEY);

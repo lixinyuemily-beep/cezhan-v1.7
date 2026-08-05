@@ -549,8 +549,7 @@ class AIService:
                 if candidate and candidate not in generic_titles:
                     return candidate[:18]
 
-            narrative_title = compact_text(narrative.get("title") or "策展单元")
-            return f"{narrative_title} · {index}"
+            return ""
 
         def fallback_item_count(index: int) -> int:
             if unit_count <= 0:
@@ -558,17 +557,22 @@ class AIService:
             base = max(1, int(round(exhibit_count / unit_count)))
             return base
 
-        result = cls.chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=4000,
-        )
+        def extract_units(value: Any) -> Optional[List[Dict[str, Any]]]:
+            if isinstance(value, list):
+                return value
+            if not isinstance(value, dict):
+                return None
+            for key in ("units", "data", "result", "items", "sections"):
+                nested = value.get(key)
+                if isinstance(nested, list):
+                    return nested
+                if isinstance(nested, dict):
+                    extracted = extract_units(nested)
+                    if extracted:
+                        return extracted
+            return None
 
-        try:
-            content = str(result.get("content") or "").strip()
+        def parse_units_content(content: str) -> List[Dict[str, Any]]:
             candidates = []
 
             if "```json" in content:
@@ -582,22 +586,6 @@ class AIService:
             if list_start != -1 and list_end != -1 and list_end > list_start:
                 candidates.append(content[list_start:list_end + 1].strip())
 
-            def extract_units(value: Any) -> Optional[List[Dict[str, Any]]]:
-                if isinstance(value, list):
-                    return value
-                if not isinstance(value, dict):
-                    return None
-                for key in ("units", "data", "result", "items", "sections"):
-                    nested = value.get(key)
-                    if isinstance(nested, list):
-                        return nested
-                    if isinstance(nested, dict):
-                        extracted = extract_units(nested)
-                        if extracted:
-                            return extracted
-                return None
-
-            parsed_units = None
             for candidate in candidates:
                 if not candidate:
                     continue
@@ -605,21 +593,27 @@ class AIService:
                     parsed = json.loads(candidate)
                     parsed_units = extract_units(parsed)
                     if isinstance(parsed_units, list):
-                        break
+                        return parsed_units
                 except Exception:
                     continue
 
-            if not isinstance(parsed_units, list):
-                print(
-                    "[AI Service] units parse fallback: response is not a JSON array; "
-                    f"content_prefix={content[:240]!r}"
-                )
-                parsed_units = []
+            raise ValueError("units response is not a valid JSON array")
+
+        def normalize_units(parsed_units: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            if len(parsed_units) < len(expected_tags):
+                raise ValueError("units response has fewer units than expected")
 
             normalized_units: List[Dict[str, Any]] = []
+            fallback_narratives = {
+                "序章": "交代主题缘起与观看入口，为正文展开蓄势。",
+                "尾声": "回望全文主旨，完成情绪收束与余韵延展。",
+            }
 
             for index, expected_tag in enumerate(expected_tags):
                 source = parsed_units[index] if index < len(parsed_units) and isinstance(parsed_units[index], dict) else {}
+                if not source:
+                    raise ValueError(f"unit {expected_tag} is missing")
+
                 is_structure_only = expected_tag in {"序章", "尾声"}
                 narrative_text = str(
                     source.get("narrative")
@@ -633,19 +627,16 @@ class AIService:
                     or source.get("desc")
                     or ""
                 ).strip()
+                title_text = fallback_unit_title(index, source, expected_tag)
 
-                fallback_titles = {
-                    "序章": "序章",
-                    "尾声": "尾声",
-                }
-                fallback_narratives = {
-                    "序章": "交代主题缘起与观看入口，为正文展开蓄势。",
-                    "尾声": "回望全文主旨，完成情绪收束与余韵延展。",
-                }
+                if not is_structure_only and not title_text:
+                    raise ValueError(f"unit {expected_tag} title is not meaningful")
+                if not is_structure_only and not (narrative_text or description_text):
+                    raise ValueError(f"unit {expected_tag} narrative is empty")
 
                 normalized_unit: Dict[str, Any] = {
                     "tag": expected_tag,
-                    "title": fallback_unit_title(index, source, expected_tag) or fallback_titles.get(expected_tag, expected_tag),
+                    "title": title_text or expected_tag,
                     "description": description_text or narrative_text or fallback_narratives.get(expected_tag, ""),
                     "narrative": narrative_text or description_text or fallback_narratives.get(expected_tag, ""),
                     "theme": str(source.get("theme") or "").strip(),
@@ -660,19 +651,25 @@ class AIService:
                 normalized_units.append(normalized_unit)
 
             return normalized_units
-        except Exception as e:
-            print(f"[AI Service] units normalize fallback: {e}")
-            return [
-                {
-                    "tag": expected_tag,
-                    "title": fallback_unit_title(index, {}, expected_tag),
-                    "description": "该单元结构由系统根据当前叙事方向临时生成，可在页面中继续编辑优化。",
-                    "narrative": "承接整体叙事，组织对应展品线索。",
-                    **({} if expected_tag in {"序章", "尾声"} else {"items": fallback_item_count(index)}),
-                    "theme": "",
-                }
-                for index, expected_tag in enumerate(expected_tags)
-            ]
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                result = cls.chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=4000,
+                )
+                content = str(result.get("content") or "").strip()
+                return normalize_units(parse_units_content(content))
+            except Exception as e:
+                last_error = e
+                print(f"[AI Service] units generation attempt {attempt}/3 failed: {e}")
+
+        raise ValueError("单元结构生成失败：AI 连续 3 次未返回合格结构，请重新生成本步。")
     
     @classmethod
     def recommend_exhibits(
