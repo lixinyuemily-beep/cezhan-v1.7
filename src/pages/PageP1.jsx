@@ -50,8 +50,8 @@ const RHYTHM_BASELINE = 50;
 const UNIT_COUNT_MIN = 2;
 const ITEMS_PER_UNIT_MIN = 2;
 const ITEMS_PER_UNIT_FALLBACK_LIMIT = 50;
-const SAMPLE_EXHIBIT_FILE_NAME = "民族文化宫-组A展品.xlsx";
-const SAMPLE_EXHIBIT_FILE_URL = `/downloads/${encodeURIComponent(SAMPLE_EXHIBIT_FILE_NAME)}?v=20260728`;
+const SAMPLE_EXHIBIT_FILE_NAME = "示例展品清单.xlsx";
+const SAMPLE_EXHIBIT_FILE_URL = `/downloads/${encodeURIComponent(SAMPLE_EXHIBIT_FILE_NAME)}?v=20260806`;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const getSliderFillPercentage = (value, min, max) => (max <= min ? 100 : ((value - min) / (max - min)) * 100);
@@ -896,7 +896,7 @@ export const PageP1 = ({
             展品清单上传（必填）
           </label>
           <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 8 }}>
-            仅支持固定模板：{EXHIBIT_TEMPLATE_HEADERS.join('、')}。模板不匹配会直接报错；`.xlsx` 中可解析图片列与嵌入图片，当前支持异步解析最高 360MB。
+            当前仅支持固定模板列：{EXHIBIT_TEMPLATE_HEADERS.join('、')}。
             <a
               href={SAMPLE_EXHIBIT_FILE_URL}
               download={SAMPLE_EXHIBIT_FILE_NAME}
