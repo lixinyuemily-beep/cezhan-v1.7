@@ -523,94 +523,92 @@ class AIService:
         expected_tags = ["序章"] + [regular_tag(i + 1) for i in range(max(unit_count, 0))] + ["尾声"]
         last_error: Optional[Exception] = None
 
-        for _ in range(2):
-            result = cls.chat_completion(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=12000,
-            )
+        result = cls.chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=4000,
+        )
 
-            try:
-                content = str(result.get("content") or "").strip()
-                candidates = []
+        try:
+            content = str(result.get("content") or "").strip()
+            candidates = []
 
-                if "```json" in content:
-                    candidates.append(content.split("```json", 1)[1].split("```", 1)[0].strip())
-                if "```" in content:
-                    candidates.append(content.split("```", 1)[1].split("```", 1)[0].strip())
-                candidates.append(content)
+            if "```json" in content:
+                candidates.append(content.split("```json", 1)[1].split("```", 1)[0].strip())
+            if "```" in content:
+                candidates.append(content.split("```", 1)[1].split("```", 1)[0].strip())
+            candidates.append(content)
 
-                list_start = content.find("[")
-                list_end = content.rfind("]")
-                if list_start != -1 and list_end != -1 and list_end > list_start:
-                    candidates.append(content[list_start:list_end + 1].strip())
+            list_start = content.find("[")
+            list_end = content.rfind("]")
+            if list_start != -1 and list_end != -1 and list_end > list_start:
+                candidates.append(content[list_start:list_end + 1].strip())
 
-                parsed_units = None
-                for candidate in candidates:
-                    if not candidate:
-                        continue
-                    try:
-                        parsed_units = json.loads(candidate)
-                        if isinstance(parsed_units, list):
-                            break
-                    except Exception:
-                        continue
+            parsed_units = None
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                try:
+                    parsed_units = json.loads(candidate)
+                    if isinstance(parsed_units, list):
+                        break
+                except Exception:
+                    continue
 
-                if not isinstance(parsed_units, list):
-                    raise ValueError("units response is not a valid JSON array")
+            if not isinstance(parsed_units, list):
+                raise ValueError("units response is not a valid JSON array")
 
-                normalized_units: List[Dict[str, Any]] = []
+            normalized_units: List[Dict[str, Any]] = []
 
-                for index, expected_tag in enumerate(expected_tags):
-                    source = parsed_units[index] if index < len(parsed_units) and isinstance(parsed_units[index], dict) else {}
-                    is_structure_only = expected_tag in {"序章", "尾声"}
-                    narrative_text = str(
-                        source.get("narrative")
-                        or source.get("desc")
-                        or source.get("description")
-                        or ""
-                    ).strip()
-                    description_text = str(
-                        source.get("description")
-                        or source.get("narrative")
-                        or source.get("desc")
-                        or ""
-                    ).strip()
-                    title_text = str(source.get("title") or "").strip()
+            for index, expected_tag in enumerate(expected_tags):
+                source = parsed_units[index] if index < len(parsed_units) and isinstance(parsed_units[index], dict) else {}
+                is_structure_only = expected_tag in {"序章", "尾声"}
+                narrative_text = str(
+                    source.get("narrative")
+                    or source.get("desc")
+                    or source.get("description")
+                    or ""
+                ).strip()
+                description_text = str(
+                    source.get("description")
+                    or source.get("narrative")
+                    or source.get("desc")
+                    or ""
+                ).strip()
+                title_text = str(source.get("title") or "").strip()
 
-                    fallback_titles = {
-                        "序章": "序章",
-                        "尾声": "尾声",
-                    }
-                    fallback_narratives = {
-                        "序章": "交代主题缘起与观看入口，为正文展开蓄势。",
-                        "尾声": "回望全文主旨，完成情绪收束与余韵延展。",
-                    }
+                fallback_titles = {
+                    "序章": "序章",
+                    "尾声": "尾声",
+                }
+                fallback_narratives = {
+                    "序章": "交代主题缘起与观看入口，为正文展开蓄势。",
+                    "尾声": "回望全文主旨，完成情绪收束与余韵延展。",
+                }
 
-                    normalized_unit: Dict[str, Any] = {
-                        "tag": expected_tag,
-                        "title": title_text or fallback_titles.get(expected_tag, expected_tag),
-                        "description": description_text or narrative_text or fallback_narratives.get(expected_tag, ""),
-                        "narrative": narrative_text or description_text or fallback_narratives.get(expected_tag, ""),
-                        "theme": str(source.get("theme") or "").strip(),
-                    }
+                normalized_unit: Dict[str, Any] = {
+                    "tag": expected_tag,
+                    "title": title_text or fallback_titles.get(expected_tag, expected_tag),
+                    "description": description_text or narrative_text or fallback_narratives.get(expected_tag, ""),
+                    "narrative": narrative_text or description_text or fallback_narratives.get(expected_tag, ""),
+                    "theme": str(source.get("theme") or "").strip(),
+                }
 
-                    if not is_structure_only:
-                        normalized_unit["items"] = int(source.get("items") or 0)
+                if not is_structure_only:
+                    normalized_unit["items"] = int(source.get("items") or 0)
 
-                    normalized_units.append(normalized_unit)
+                normalized_units.append(normalized_unit)
 
-                main_units = [u for u in normalized_units if u.get("tag") not in {"序章", "尾声"}]
-                if not main_units or any(not str(u.get("title") or "").strip() or str(u.get("title") or "").strip() == str(u.get("tag") or "").strip() for u in main_units):
-                    raise ValueError("units response does not contain meaningful unit titles")
+            main_units = [u for u in normalized_units if u.get("tag") not in {"序章", "尾声"}]
+            if not main_units or any(not str(u.get("title") or "").strip() or str(u.get("title") or "").strip() == str(u.get("tag") or "").strip() for u in main_units):
+                raise ValueError("units response does not contain meaningful unit titles")
 
-                return normalized_units
-            except Exception as e:
-                last_error = e
-                continue
+            return normalized_units
+        except Exception as e:
+            last_error = e
 
         raise ValueError(f"单元结构生成失败：模型未返回有效的单元结构，请重试。{f' 最后一次错误：{last_error}' if last_error else ''}")
     
