@@ -1352,29 +1352,6 @@ export const PageP1 = ({
 
       <div style={{
         marginTop: 30,
-        background: C.bgElevated || "#F3F3F1",
-        borderRadius: 18,
-        padding: "16px 18px",
-        border: `1px solid ${C.border}`,
-        boxShadow: C.shadowSm,
-        display: "flex", flexDirection: "column", gap: 6,
-      }}>
-        <div style={{ fontSize: 12, color: C.textSecondary, display: "flex", alignItems: "center", gap: 6 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          当前展品库：{uploadedExhibits.length > 0 ? `已上传 ${uploadedExhibits.length} 件展品` : '暂未上传展品'}
-        </div>
-        <div style={{ fontSize: 12, color: C.textSecondary, display: "flex", alignItems: "center", gap: 6 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          AI 生成内容基于上述数据，冷门或高度专业领域可能生成质量有限，建议上传展品后查看推荐置信度
-        </div>
-      </div>
-
-      <div style={{
-        marginTop: 30,
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",

@@ -30,9 +30,20 @@ export const Topbar = ({
   const [countdown, setCountdown] = useState(0);
   const [codeSentEmail, setCodeSentEmail] = useState('');
   const [form, setForm] = useState({ email: '', code: '' });
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window === 'undefined' ? 1440 : window.innerWidth
+  ));
   const panelRef = useRef(null);
   const isLoggedIn = !!authUser;
   const avatarText = authUser?.display_name?.slice(0, 1)?.toUpperCase() || authUser?.email?.slice(0, 1)?.toUpperCase() || '访';
+  const isCompact = viewportWidth < 1360;
+  const isNarrow = viewportWidth < 1180;
+  const isVeryNarrow = viewportWidth < 1020;
+  const connectorWidth = isVeryNarrow ? 20 : isNarrow ? 34 : isCompact ? 54 : 84;
+  const showStepLabels = !isVeryNarrow;
+  const showTitle = !isVeryNarrow;
+  const showAutosaveText = !isNarrow;
+  const showExportText = !isVeryNarrow;
 
   useEffect(() => {
     if (!authPanelOpen) return undefined;
@@ -52,6 +63,14 @@ export const Topbar = ({
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [countdown]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const handleStepClick = (step) => {
     if (step <= completedStep && step !== currentStep) {
@@ -116,8 +135,8 @@ export const Topbar = ({
     <header style={{
       position: 'fixed', top: 0, left: 232, right: 0, height: 52,
       background: C.bgElevated || C.bgSecondary, borderBottom: `1px solid ${C.border}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
-      zIndex: 99, padding: '0 28px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: isNarrow ? 8 : 16,
+      zIndex: 99, padding: isNarrow ? '0 14px' : '0 28px',
       backdropFilter: 'blur(14px)',
       boxShadow: '0 4px 20px rgba(16, 24, 40, 0.04)',
     }}>
@@ -125,21 +144,22 @@ export const Topbar = ({
         fontSize: 12,
         color: C.textSecondary,
         letterSpacing: '0.02em',
-        flex: '0 1 28%',
+        flex: isCompact ? '0 1 18%' : '0 1 28%',
         minWidth: 120,
-        maxWidth: 360,
+        maxWidth: isCompact ? 220 : 360,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        display: showTitle ? 'block' : 'none',
       }}>
         {topbarTitle}
       </span>
 
       {isOnStepPage && (
         <div style={{
-          flex: '1 1 520px',
-          minWidth: 420,
-          maxWidth: 760,
+          flex: '1 1 auto',
+          minWidth: 0,
+          maxWidth: isNarrow ? 520 : 760,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -158,6 +178,7 @@ export const Topbar = ({
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
                     cursor: isAvailable && !isActive ? 'pointer' : 'default', gap: 3,
+                    minWidth: showStepLabels ? 48 : 24,
                   }}
                   title={isAvailable && !isActive ? `跳转到 ${label}` : ''}
                 >
@@ -173,11 +194,12 @@ export const Topbar = ({
                     fontSize: 10, whiteSpace: 'nowrap',
                     color: isActive ? C.accentPrimary : C.textSecondary,
                     fontWeight: isActive ? 700 : 400,
+                    display: showStepLabels ? 'inline' : 'none',
                   }}>{label}</span>
                 </div>
                 {i < STEPS.length - 1 && (
                   <div style={{
-                    width: 84, height: 2, margin: '0 4px', marginTop: -10,
+                    width: connectorWidth, height: 2, margin: '0 4px', marginTop: showStepLabels ? -10 : 0,
                     background: n < completedStep ? C.success : C.stepInactive,
                     transition: 'background 0.2s',
                   }} />
@@ -188,15 +210,22 @@ export const Topbar = ({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flex: '0 0 auto', minWidth: 260 }}>
-        {isOnStepPage && <span style={{ fontSize: 12, color: C.success, fontWeight: 600 }}>✓ 已自动保存</span>}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: isNarrow ? 8 : 12,
+        flex: '0 0 auto',
+        minWidth: isVeryNarrow ? 92 : isNarrow ? 160 : 260,
+      }}>
+        {isOnStepPage && <span style={{ fontSize: 12, color: C.success, fontWeight: 600 }}>{showAutosaveText ? '✓ 已自动保存' : '✓'}</span>}
         {isOnStepPage && (
           <Btn
             small
             disabled={!canExport}
             onClick={handleExportClick}
           >
-            导出大纲
+            {showExportText ? '导出大纲' : '导出'}
           </Btn>
         )}
         <div ref={panelRef} style={{ position: 'relative' }}>
