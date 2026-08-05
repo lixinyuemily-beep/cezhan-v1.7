@@ -34,6 +34,7 @@ export const PageStep1 = ({
   ];
   const hasSelectedNarrative = selectedNarrative !== null && selectedNarrative !== undefined;
   const selectedPlan = hasSelectedNarrative ? plans?.[selectedNarrative] : null;
+  const canConfirmNarrative = !!selectedPlan && !isGenerating;
   const displayExhibitionTitle =
     selectedPlan?.title ||
     currentProject?.llmParams?.exhibition_title ||
@@ -376,7 +377,7 @@ export const PageStep1 = ({
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <Btn variant="ghost" onClick={() => navigateTo("p0")}>← 返回</Btn>
-          <Btn onClick={handleConfirm} disabled={isGenerating}>
+          <Btn onClick={handleConfirm} disabled={!canConfirmNarrative}>
             {isGenerating ? '正在生成单元结构...' : '确认方向，进入下一步 →'}
           </Btn>
         </div>
