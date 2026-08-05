@@ -7,6 +7,7 @@ import { ToastProvider } from "./components/ui/Toast";
 import { PageP0, PageP1, PageExhibits, PageSettings, PageHelp, PageStep1, PageStep2, PageStep3, PageStep4, PageStep5 } from "./pages";
 import { getTheme, FONT_UI, FONT_SERIF } from "./constants/theme";
 import { ThemeProvider } from "./hooks/useTheme";
+import { retryAsync } from "./utils/retry";
 
 const PAGE_COMPONENTS = {
   p0: PageP0,
@@ -35,10 +36,14 @@ function CurationApp() {
     
     const checkBackend = async () => {
       try {
-        await api.health();
+        await retryAsync(() => api.health(), {
+          label: 'health check',
+          retries: 3,
+          delayMs: 800,
+        });
       } catch (error) {
         console.error('后端连接失败:', error);
-        store.showToast('后端连接失败，请确保后端服务已启动', 'error');
+        store.showToast('网络连接不稳定，正在尝试恢复；如果持续出现，请刷新页面。', 'error');
       }
     };
     checkBackend();
@@ -48,8 +53,16 @@ function CurationApp() {
       
       try {
         const [response, completedResponse] = await Promise.all([
-          api.projects.list(activeUserId),
-          api.projects.getCompletedList(activeUserId)
+          retryAsync(() => api.projects.list(activeUserId), {
+            label: 'load projects',
+            retries: 3,
+            delayMs: 900,
+          }),
+          retryAsync(() => api.projects.getCompletedList(activeUserId), {
+            label: 'load completed projects',
+            retries: 3,
+            delayMs: 900,
+          })
         ]);
         
         const inProgress = response
@@ -98,7 +111,7 @@ function CurationApp() {
         setCompletedProjects(completed);
       } catch (error) {
         console.error('加载项目失败:', error);
-        store.showToast('后端连接失败，请确保后端服务已启动', 'error');
+        store.showToast(error?.message || '项目数据加载失败，请稍后刷新重试。', 'error');
       }
     };
 
