@@ -16,8 +16,10 @@ from ..models.schemas import (
     OutlineRequest, OutlineResponse
 )
 from ..services.ai_service import ai_service
+from ..services.ai_unit_task_service import ai_unit_task_service
 
 router = APIRouter(prefix="/ai", tags=["AI"])
+_background_unit_tasks = set()
 
 
 async def run_ai_call(func, *args, **kwargs):
@@ -59,6 +61,44 @@ async def generate_units(request: UnitsRequest):
         return UnitsResponse(units=units)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_units_task(task_id: str, request: UnitsRequest) -> None:
+    ai_unit_task_service.mark_running(task_id)
+    try:
+        units = await run_ai_call(
+            ai_service.generate_units,
+            narrative=request.narrative,
+            exhibit_count=request.exhibit_count,
+            unit_count=request.unit_count or 3,
+            exhibit_list=request.exhibit_list,
+            narrative_rhythm=request.narrative_rhythm,
+        )
+        ai_unit_task_service.mark_success(task_id, units)
+    except Exception as error:
+        ai_unit_task_service.mark_failed(task_id, error)
+
+
+@router.post("/units/tasks")
+async def start_units_task(request: UnitsRequest):
+    """创建单元结构后台任务；每个任务只调用模型一次。"""
+    task = ai_unit_task_service.create()
+    background_task = asyncio.create_task(_run_units_task(task["task_id"], request))
+    _background_unit_tasks.add(background_task)
+    background_task.add_done_callback(_background_unit_tasks.discard)
+    return task
+
+
+@router.get("/units/tasks/{task_id}")
+async def get_units_task(task_id: str):
+    """短轮询查询单元结构后台任务。"""
+    try:
+        task = ai_unit_task_service.get(task_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    if not task:
+        raise HTTPException(status_code=404, detail="单元结构生成任务不存在或已过期")
+    return task
 
 
 @router.post("/recommend", response_model=RecommendResponse)

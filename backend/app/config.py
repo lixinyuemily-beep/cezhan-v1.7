@@ -25,10 +25,15 @@ class Settings(BaseSettings):
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    deepseek_thinking_enabled: bool = os.getenv("DEEPSEEK_THINKING_ENABLED", "false").lower() == "true"
     ai_max_concurrent_requests: int = int(os.getenv("AI_MAX_CONCURRENT_REQUESTS", "5"))
     ai_queue_wait_timeout_seconds: int = int(os.getenv("AI_QUEUE_WAIT_TIMEOUT_SECONDS", "45"))
     ai_request_timeout_seconds: int = int(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "180"))
     ai_debug_log_prompts: bool = os.getenv("AI_DEBUG_LOG_PROMPTS", "false").lower() == "true"
+    ai_unit_task_dir: str = os.getenv(
+        "AI_UNIT_TASK_DIR",
+        str(BACKEND_ROOT / "storage" / "ai_unit_tasks"),
+    )
 
     # FastAPI配置
     app_name: str = "策展智能助手 API"

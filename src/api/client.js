@@ -5,8 +5,9 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const EXHIBIT_PARSE_START_TIMEOUT = 30 * 60 * 1000;
 const EXHIBIT_PARSE_POLL_INTERVAL_MS = 1200;
 const AI_GENERATION_TIMEOUT = 3 * 60 * 1000;
-const AI_UNITS_GENERATION_TIMEOUT = 3 * 60 * 1000;
 const AI_BATCH_GENERATION_TIMEOUT = 5 * 60 * 1000;
+const AI_UNITS_POLL_INTERVAL_MS = 2000;
+const AI_UNITS_POLL_LIMIT = 600;
 const AUTH_STORAGE_KEY = 'curation_auth_session';
 
 const apiClient = axios.create({
@@ -100,6 +101,61 @@ async function waitForExhibitParseTask(taskId, options = {}) {
   throw new Error('解析任务等待超时，请稍后重试。');
 }
 
+async function waitForUnitsTask(taskId, options = {}) {
+  const intervalMs = Number(options.intervalMs || AI_UNITS_POLL_INTERVAL_MS);
+  let consecutivePollErrors = 0;
+
+  for (let attempt = 0; attempt < AI_UNITS_POLL_LIMIT; attempt += 1) {
+    try {
+      const task = await apiClient.get(`/ai/units/tasks/${taskId}`);
+      consecutivePollErrors = 0;
+      options.onTaskProgress?.(task);
+
+      if (task.status === 'success') {
+        return task.result;
+      }
+      if (task.status === 'failed') {
+        const generationError = new Error(task.error || '模型未返回有效的单元结构');
+        generationError.isUnitTaskFailure = true;
+        throw generationError;
+      }
+    } catch (error) {
+      if (error?.isUnitTaskFailure) throw error;
+      consecutivePollErrors += 1;
+      if (consecutivePollErrors >= 3) throw error;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error('单元结构生成任务等待超时');
+}
+
+async function generateUnitsWithTask(data, options = {}) {
+  let lastError = null;
+
+  for (let generationAttempt = 0; generationAttempt < 2; generationAttempt += 1) {
+    try {
+      const task = await apiClient.post('/ai/units/tasks', data);
+      options.onTaskProgress?.({ ...task, generation_attempt: generationAttempt + 1 });
+      return await waitForUnitsTask(task.task_id, options);
+    } catch (error) {
+      lastError = error;
+      if (generationAttempt === 0 && error?.isUnitTaskFailure) {
+        options.onTaskProgress?.({
+          status: 'retrying',
+          generation_attempt: 2,
+          error: String(error?.message || ''),
+        });
+        continue;
+      }
+      break;
+    }
+  }
+
+  throw new Error(`单元结构生成失败：已自动重试 1 次，模型仍未返回合格结构。请重新生成本步。${lastError?.message ? ` 原因：${lastError.message}` : ''}`);
+}
+
 export const api = {
   auth: {
     sendCode: (data) => apiClient.post('/auth/send-code', data),
@@ -160,7 +216,7 @@ export const api = {
   
   ai: {
     generateNarrative: (data) => apiClient.post('/ai/narrative', data),
-    generateUnits: (data) => apiClient.post('/ai/units', data, { timeout: AI_UNITS_GENERATION_TIMEOUT }),
+    generateUnits: (data, options = {}) => generateUnitsWithTask(data, options),
     recommendExhibits: (data) => apiClient.post('/ai/recommend', data),
     recommendExhibitsBatch: (data) => apiClient.post('/ai/recommend-batch', data),
     generateTextSectionsBatch: (data) => apiClient.post('/ai/text-sections-batch', data, { timeout: AI_BATCH_GENERATION_TIMEOUT }),

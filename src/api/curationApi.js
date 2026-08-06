@@ -1,5 +1,4 @@
 import { api } from './client';
-import { retryAsync } from '../utils/retry';
 import {
   getExhibitIntroduction,
   getExhibitMaterial,
@@ -19,7 +18,6 @@ export async function generateCurationOutline(params) {
 
   try {
     const exhibitInfo = params.exhibits
-      .slice(0, 20)
       .map(ex => `${getExhibitName(ex) || '未知'} (${getExhibitTime(ex)} ${getExhibitPlace(ex)} ${getExhibitMaterial(ex)} ${getExhibitOther(ex)})`)
       .join('、');
 
@@ -134,21 +132,13 @@ export async function generateUnitStructure(params) {
       introduction: getExhibitIntroduction(ex),
     }));
 
-    const result = await retryAsync(
-      () => api.ai.generateUnits({
-        narrative: narrative,
-        exhibit_count: params.exhibits.length,
-        unit_count: params.advanced_settings?.unitCount || 3,
-        exhibit_list: exhibitList,
-        narrative_rhythm: params.narrative_rhythm || null,
-      }),
-      {
-        label: 'generate units',
-        retries: 3,
-        delayMs: 1800,
-        shouldRetryResult: (response) => !Array.isArray(response?.units) || response.units.length === 0,
-      }
-    );
+    const result = await api.ai.generateUnits({
+      narrative: narrative,
+      exhibit_count: params.exhibits.length,
+      unit_count: params.advanced_settings?.unitCount || 3,
+      exhibit_list: exhibitList,
+      narrative_rhythm: params.narrative_rhythm || null,
+    });
 
     const units = (result.units || []).map((u, i) => {
       const tag = u.tag || `第${i + 1}单元`;

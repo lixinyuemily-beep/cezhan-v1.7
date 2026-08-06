@@ -320,6 +320,7 @@ class AIService:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             timeout=settings.ai_request_timeout_seconds,
+            max_retries=0,
         )
 
     @staticmethod
@@ -357,12 +358,18 @@ class AIService:
         try:
             client = cls._get_client()
             resolved_model = model or settings.deepseek_model
+            extra_body = dict(kwargs.pop("extra_body", {}) or {})
+            extra_body.setdefault(
+                "thinking",
+                {"type": "enabled" if settings.deepseek_thinking_enabled else "disabled"},
+            )
 
             response = client.chat.completions.create(
                 model=resolved_model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
                 **kwargs
             )
         finally:
@@ -415,9 +422,9 @@ class AIService:
             '- 用户未提供展览主题，请你基于展品池为每个方案拟定一个简洁、可展示的题目；3个方案的title必须彼此不同，且不能使用“策展主题”“未命名展览”“方案A”之类占位词。'
         )
         example_json = (
-            f'[{{"title": "{normalized_theme}", "desc": "描述..."}}]'
+            f'[{{"title": "{normalized_theme}", "desc": "描述...", "logic": "如何落实展品特征与用户意图..."}}]'
             if has_user_theme else
-            '[{"title": "玉礼与王朝秩序", "desc": "从礼制与权力象征切入，组织展品之间的制度线索。"}, {"title": "青铜时代的工艺回响", "desc": "从材料、铸造与纹饰演进切入，展现技术与审美的同步变化。"}]'
+            '[{"title": "玉礼与王朝秩序", "desc": "从礼制与权力象征切入，组织展品之间的制度线索。", "logic": "以时代演进为主线，突出礼制器物，弱化无关题材。"}, {"title": "青铜时代的工艺回响", "desc": "从材料、铸造与纹饰演进切入，展现技术与审美的同步变化。", "logic": "按工艺变化组织单元，兼顾地域差异与观看节奏。"}]'
         )
         
         additional_info = f"\n补充策展意图：{additional_intent}" if additional_intent else ""
@@ -453,25 +460,30 @@ class AIService:
             for index, option in enumerate(options[:3]):
                 option_title = ""
                 option_desc = ""
+                option_logic = ""
                 if isinstance(option, dict):
                     option_title = cls._sanitize_narrative_title(option.get("title", ""))
                     option_desc = cls._sanitize_narrative_desc(option.get("desc", ""))
+                    option_logic = cls._sanitize_narrative_desc(
+                        option.get("logic") or option.get("intent_summary") or ""
+                    )
                 normalized_options.append({
                     "title": normalized_theme if has_user_theme else (option_title or f"未命名方案 {index + 1}"),
-                    "desc": option_desc
+                    "desc": option_desc,
+                    "logic": option_logic or option_desc,
                 })
             return normalized_options
         except Exception as e:
             if has_user_theme:
                 return [
-                    {"title": normalized_theme, "desc": "以文明交流为切入点，组织展品之间的互动关系。"},
-                    {"title": normalized_theme, "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。"},
-                    {"title": normalized_theme, "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。"}
+                    {"title": normalized_theme, "desc": "以文明交流为切入点，组织展品之间的互动关系。", "logic": "从展品的时代与地域联系组织文明交流线索。"},
+                    {"title": normalized_theme, "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。", "logic": "按材料、工艺与技术传播关系组织内容。"},
+                    {"title": normalized_theme, "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。", "logic": "比较不同地域展品的风格差异与审美呼应。"}
                 ]
             return [
-                {"title": "器物与文明的回声", "desc": "以文明交流为切入点，组织展品之间的互动关系。"},
-                {"title": "工艺如何塑造时代", "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。"},
-                {"title": "风格的迁徙与共鸣", "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。"}
+                {"title": "器物与文明的回声", "desc": "以文明交流为切入点，组织展品之间的互动关系。", "logic": "从展品的时代与地域联系组织文明交流线索。"},
+                {"title": "工艺如何塑造时代", "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。", "logic": "按材料、工艺与技术传播关系组织内容。"},
+                {"title": "风格的迁徙与共鸣", "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。", "logic": "比较不同地域展品的风格差异与审美呼应。"}
             ]
     
     @classmethod
@@ -497,8 +509,14 @@ class AIService:
         """
         exhibit_list = exhibit_list or []
         exhibit_summary = "\n".join([
-            f"- {ex.get('name', '未知展品')}: {cls._get_exhibit_time(ex)} {cls._get_exhibit_place(ex)} {cls._get_exhibit_material(ex)}"
-            for ex in exhibit_list[:20]
+            (
+                f"{index + 1}. {ex.get('name', '未知展品')} | "
+                f"时间：{cls._get_exhibit_time(ex)} | 地点：{cls._get_exhibit_place(ex)} | "
+                f"材质：{cls._get_exhibit_material(ex)} | "
+                f"介绍：{str(ex.get('introduction') or '')[:120]} | "
+                f"其他：{str(ex.get('other') or '')[:80]}"
+            )
+            for index, ex in enumerate(exhibit_list)
         ])
         rhythm_instruction = cls._build_rhythm_instruction(narrative_rhythm)
         
@@ -652,28 +670,16 @@ class AIService:
 
             return normalized_units
 
-        try:
-            result = cls.chat_completion(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.4,
-                max_tokens=1800,
-                response_format={"type": "json_object"},
-                extra_body={"thinking": {"type": "disabled"}},
-            )
-        except Exception as e:
-            print(f"[AI Service] units json_object call failed, retrying without response_format: {e}")
-            result = cls.chat_completion(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.4,
-                max_tokens=1800,
-                extra_body={"thinking": {"type": "disabled"}},
-            )
+        result = cls.chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.4,
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+            extra_body={"thinking": {"type": "disabled"}},
+        )
 
         try:
             content = str(result.get("content") or "").strip()
