@@ -661,6 +661,7 @@ class AIService:
                 temperature=0.4,
                 max_tokens=1800,
                 response_format={"type": "json_object"},
+                extra_body={"thinking": {"type": "disabled"}},
             )
         except Exception as e:
             print(f"[AI Service] units json_object call failed, retrying without response_format: {e}")
@@ -671,6 +672,7 @@ class AIService:
                 ],
                 temperature=0.4,
                 max_tokens=1800,
+                extra_body={"thinking": {"type": "disabled"}},
             )
 
         try:
