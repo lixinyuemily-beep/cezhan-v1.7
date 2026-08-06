@@ -89,10 +89,10 @@ UNITS_USER = """请为以下展览设计单元结构：
 - narrative 必须写该单元在整体叙事中的作用与推进位置，不能只是把 description 简写一遍
 - description 要更偏向该单元会讲什么内容，narrative 要更偏向它在整场展览里承担什么叙事功能
 
-请只返回 JSON 数组，不要输出 Markdown、解释文字、代码块标记或 JSON 对象。数组顺序为：序章、主体单元1...N、尾声。
-例如：[{{"tag": "序章", "title": "开篇", "description": "描述...", "narrative": "引入主题"}}, {{"tag": "第一单元", "title": "单元标题", "description": "描述...", "narrative": "叙事定位", "items": 5}}, {{"tag": "尾声", "title": "总结", "description": "描述...", "narrative": "升华主题"}}]
+请只返回 JSON 对象，不要输出 Markdown、解释文字或代码块标记。格式必须为：
+{{"units":[{{"tag":"序章","title":"序章","description":"描述...","narrative":"引入主题"}},{{"tag":"第一单元","title":"单元标题","description":"描述...","narrative":"叙事定位","items":5}},{{"tag":"尾声","title":"尾声","description":"描述...","narrative":"升华主题"}}]}}
 
-请确保返回有效的JSON数组。"""
+请确保返回有效 JSON，且 units 数组顺序为：序章、主体单元1...N、尾声。"""
 
 
 # ==================== Step 3: 展品推荐 ====================

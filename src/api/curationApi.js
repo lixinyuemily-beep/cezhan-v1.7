@@ -144,7 +144,7 @@ export async function generateUnitStructure(params) {
       }),
       {
         label: 'generate units',
-        retries: 1,
+        retries: 3,
         delayMs: 1800,
         shouldRetryResult: (response) => !Array.isArray(response?.units) || response.units.length === 0,
       }

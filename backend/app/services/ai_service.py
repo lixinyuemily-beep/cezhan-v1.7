@@ -652,24 +652,33 @@ class AIService:
 
             return normalized_units
 
-        last_error: Optional[Exception] = None
-        for attempt in range(1, 4):
-            try:
-                result = cls.chat_completion(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=4000,
-                )
-                content = str(result.get("content") or "").strip()
-                return normalize_units(parse_units_content(content))
-            except Exception as e:
-                last_error = e
-                print(f"[AI Service] units generation attempt {attempt}/3 failed: {e}")
+        try:
+            result = cls.chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.4,
+                max_tokens=1800,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            print(f"[AI Service] units json_object call failed, retrying without response_format: {e}")
+            result = cls.chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.4,
+                max_tokens=1800,
+            )
 
-        raise ValueError("单元结构生成失败：AI 连续 3 次未返回合格结构，请重新生成本步。")
+        try:
+            content = str(result.get("content") or "").strip()
+            return normalize_units(parse_units_content(content))
+        except Exception as e:
+            print(f"[AI Service] units generation failed: {e}")
+            raise ValueError("单元结构生成失败：AI 未返回合格结构，请重新生成本步。")
     
     @classmethod
     def recommend_exhibits(
