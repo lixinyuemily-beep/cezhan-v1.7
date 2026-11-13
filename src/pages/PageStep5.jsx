@@ -176,11 +176,15 @@ export const PageStep5 = ({
   };
 
   const currentSection = getSectionContent(activeSection);
-  const gallerySections = unitsData.map((unit, index) => ({
-    id: String(index),
-    ...getSectionContent(String(index)),
-    title: unit.tag ? `${unit.tag}：${unit.title}` : unit.title,
-  }));
+  const gallerySections = [
+    { id: 'preface', ...getSectionContent('preface'), title: `${projectTitle} · 序言`, exhibits: [] },
+    ...unitsData.map((unit, index) => ({
+      id: String(index),
+      ...getSectionContent(String(index)),
+      title: unit.tag ? `${unit.tag}：${unit.title}` : unit.title,
+    })),
+    { id: 'epilogue', ...getSectionContent('epilogue'), title: '尾声', exhibits: [] },
+  ];
 
   const getExhibitId = (exhibit) => (
     exhibit?.id || exhibit?.ID || exhibit?.编号 || exhibit?.exhibit_id || exhibit?.original_index || ''

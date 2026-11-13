@@ -58,9 +58,11 @@ function textTexture({ title, body, width = 1024, height = 512, accent = '#557c8
 }
 
 function addTextPanel(scene, options, x, z, side, width, height, y) {
+  const textureWidth = 1024;
+  const textureHeight = Math.round(textureWidth * height / width);
   const panel = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
-    new THREE.MeshBasicMaterial({ map: textTexture(options), side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ map: textTexture({ ...options, width: textureWidth, height: textureHeight }), side: THREE.DoubleSide }),
   );
   panel.position.set(x, y, z);
   panel.rotation.y = side === 'left' ? Math.PI / 2 : -Math.PI / 2;
@@ -79,7 +81,7 @@ function addExhibit(scene, exhibit, x, z, side, loader, selectable) {
   image.userData.exhibit = exhibit;
   scene.add(image);
   selectable.push(image);
-  const caption = addTextPanel(scene, { title: getExhibitName(exhibit) || '未命名展品', body: plainText(exhibit.introduction || exhibit.description || exhibit['介绍']).slice(0, 90), height: 290, titleSize: 47, bodySize: 26 }, x + facing * 0.07, z, side, 1.73, 0.7, 1.02);
+  const caption = addTextPanel(scene, { title: getExhibitName(exhibit) || '未命名展品', body: plainText(exhibit.introduction || exhibit.description || exhibit['介绍']).slice(0, 90), titleSize: 47, bodySize: 26 }, x + facing * 0.07, z, side, 1.73, 0.7, 1.02);
   caption.userData.exhibit = exhibit;
   selectable.push(caption);
   const url = getExhibitFullImageUrl(exhibit);
@@ -100,7 +102,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
   const [unitIndex, setUnitIndex] = useState(0);
   const [selectedExhibit, setSelectedExhibit] = useState(null);
   const [vrSupported, setVrSupported] = useState(false);
-  const units = useMemo(() => sections.filter((section) => section.id !== 'preface' && section.id !== 'epilogue'), [sections]);
+  const units = useMemo(() => sections, [sections]);
   const unit = units[unitIndex];
 
   useEffect(() => {
@@ -117,7 +119,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
     const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 200);
     const roomWidth = 10;
     const laneGap = 3.05;
-    const unitLengths = units.map((entry) => Math.max(8.2, Math.ceil((entry.exhibits || []).length / 2) * laneGap + 4.1));
+    const unitLengths = units.map((entry) => entry.id === 'preface' || entry.id === 'epilogue' ? 7.5 : Math.max(10.8, Math.ceil((entry.exhibits || []).length / 2) * laneGap + 7.5));
     const totalDepth = Math.max(17, unitLengths.reduce((sum, length) => sum + length, 0) + 4);
     const colorOffset = projectColorOffset(title);
     const locations = [];
@@ -131,11 +133,12 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       const accent = ['#597f87', '#967352', '#677b67', '#7c7393'][(index + colorOffset) % 4];
       const exhibits = entry.exhibits || [];
       const pairs = Math.ceil(exhibits.length / 2);
-      const firstExhibitZ = start - 3.65;
+      const firstExhibitZ = start - 6.1;
       locations.push({ start, end, firstExhibitZ, accent });
       for (const side of ['left', 'right']) {
         const wallX = side === 'left' ? -roomWidth / 2 + 0.07 : roomWidth / 2 - 0.07;
-        addTextPanel(scene, { title: entry.title, body: plainText(entry.content).slice(0, 280) || '本单元展示策展方案中的展品与叙事线索。', accent, titleSize: 47, bodySize: 27 }, wallX, start - 1.38, side, 4.15, 1.9, 2.55);
+        const fallbackText = entry.id === 'preface' || entry.id === 'epilogue' ? '' : '本单元展示策展方案中的展品与叙事线索。';
+        addTextPanel(scene, { title: entry.title, body: plainText(entry.content).slice(0, 280) || fallbackText, accent, titleSize: 47, bodySize: 27 }, wallX, start - 1.38, side, 4.15, 1.9, 2.55);
         const marker = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.065, length - 0.6), new THREE.MeshBasicMaterial({ color: accent }));
         marker.position.set(wallX, 0.12, (start + end) / 2);
         scene.add(marker);
@@ -145,7 +148,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
         const z = firstExhibitZ - Math.floor(exhibitIndex / 2) * laneGap;
         addExhibit(scene, exhibit, side === 'left' ? -roomWidth / 2 + 0.14 : roomWidth / 2 - 0.14, z, side, loader, selectable);
       });
-      if (!pairs) {
+      if (!pairs && entry.id !== 'preface' && entry.id !== 'epilogue') {
         const note = addTextPanel(scene, { title: '展品待配置', body: '确认展品后将在此显示陈列预览。', accent, titleSize: 48 }, -roomWidth / 2 + 0.09, start - 4.3, 'left', 2.2, 1.0, 2.25);
         note.userData.unitIndex = index;
       }
@@ -266,14 +269,14 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
               <div style={{ position: 'absolute', left: 16, bottom: 16, padding: '8px 12px', borderRadius: 9, background: 'rgba(255,255,255,.9)', color: '#263442', fontSize: 12 }}>拖动查看 · 滚轮缩放 · 点击展品查看资料</div>
             </div>
             <aside style={{ padding: 20, overflowY: 'auto', borderLeft: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: 12, color: theme.textSecondary }}>共享展厅 · {units.length} 个单元</div>
+              <div style={{ fontSize: 12, color: theme.textSecondary }}>共享展厅 · {units.filter((entry) => entry.id !== 'preface' && entry.id !== 'epilogue').length} 个单元</div>
               <div style={{ display: 'grid', gap: 6, margin: '12px 0 18px' }}>
                 {units.map((entry, index) => <button key={`${entry.id}-${index}`} type="button" onClick={() => { setUnitIndex(index); setSelectedExhibit(null); focusUnit.current?.(index); }} style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 9, border: `1px solid ${theme.border}`, background: index === unitIndex ? theme.aiGenerated : theme.bgSecondary, color: theme.textPrimary, cursor: 'pointer' }}>{entry.title}</button>)}
               </div>
               <h2 style={{ fontSize: 19, margin: '8px 0 10px' }}>{unit.title}</h2>
               <p style={{ fontSize: 13, lineHeight: 1.7, color: theme.textSecondary }}>{plainText(unit.content) || '该单元暂无说明文字。'}</p>
               {vrSupported ? <div ref={vrHost} style={{ marginBottom: 16 }} /> : <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>支持 WebXR 的设备可进入沉浸式 VR 预览。</div>}
-              <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>{(unit.exhibits || []).length} 件展品 · 点击列表可定位展墙</div>
+              {unit.id !== 'preface' && unit.id !== 'epilogue' && <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>{(unit.exhibits || []).length} 件展品 · 点击列表可定位展墙</div>}
               {(unit.exhibits || []).map((exhibit, index) => <button key={`${getExhibitName(exhibit)}-${index}`} type="button" onClick={() => { setSelectedExhibit(exhibit); focusExhibit.current?.(unitIndex, index); }} style={{ width: '100%', display: 'flex', textAlign: 'left', gap: 9, padding: 8, marginBottom: 6, background: selectedExhibit === exhibit ? theme.aiGenerated : theme.bgSecondary, border: `1px solid ${theme.border}`, borderRadius: 10, color: theme.textPrimary, cursor: 'pointer' }}>
                 {getExhibitFullImageUrl(exhibit) && <img src={getExhibitFullImageUrl(exhibit)} alt="" style={{ width: 42, height: 42, borderRadius: 5, objectFit: 'cover' }} />}
                 <span style={{ alignSelf: 'center', fontSize: 13 }}>{getExhibitName(exhibit) || '未命名展品'}</span>
