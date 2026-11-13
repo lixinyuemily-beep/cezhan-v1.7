@@ -76,6 +76,7 @@ function makePanel(scene, exhibit, x, z, side, selectable, loader) {
 export function GalleryPreview({ title, sections, onClose, theme }) {
   const canvasHost = useRef(null);
   const vrHost = useRef(null);
+  const focusExhibit = useRef(null);
   const [unitIndex, setUnitIndex] = useState(0);
   const [selectedExhibit, setSelectedExhibit] = useState(null);
   const [vrSupported, setVrSupported] = useState(false);
@@ -154,6 +155,13 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       const z = depth / 2 - 4 - Math.floor(index / 2) * 3.7;
       makePanel(scene, exhibit, side === 'left' ? -4.91 : 4.91, z, side, selectable, loader);
     });
+    focusExhibit.current = (index) => {
+      const side = index % 2 === 0 ? -1 : 1;
+      const z = depth / 2 - 4 - Math.floor(index / 2) * 3.7;
+      camera.position.set(side * 1.4, 2.25, z + 2.8);
+      controls.target.set(side * 4.8, 2.2, z);
+      controls.update();
+    };
 
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
@@ -206,6 +214,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       renderer.dispose();
       renderer.domElement.remove();
       vrHost.current?.replaceChildren();
+      focusExhibit.current = null;
     };
   }, [unit, vrSupported]);
 
@@ -238,9 +247,9 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
                 <button type="button" disabled={unitIndex >= units.length - 1} onClick={() => setUnitIndex(unitIndex + 1)} style={{ flex: 1, padding: 9, cursor: 'pointer' }}>下一单元</button>
               </div>
               {vrSupported ? <div ref={vrHost} style={{ marginBottom: 16 }} /> : <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>支持 WebXR 的设备可进入沉浸式 VR 预览。</div>}
-              <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>{(unit.exhibits || []).length} 件展品 · 展墙随数量扩展</div>
+              <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>{(unit.exhibits || []).length} 件展品 · 点击列表可定位展墙</div>
               {(unit.exhibits || []).map((exhibit, index) => (
-                <button key={`${getExhibitName(exhibit)}-${index}`} type="button" onClick={() => setSelectedExhibit(exhibit)} style={{ width: '100%', display: 'flex', textAlign: 'left', gap: 9, padding: 8, marginBottom: 6, background: selectedExhibit === exhibit ? theme.aiGenerated : theme.bgSecondary, border: `1px solid ${theme.border}`, borderRadius: 10, color: textColor, cursor: 'pointer' }}>
+                <button key={`${getExhibitName(exhibit)}-${index}`} type="button" onClick={() => { setSelectedExhibit(exhibit); focusExhibit.current?.(index); }} style={{ width: '100%', display: 'flex', textAlign: 'left', gap: 9, padding: 8, marginBottom: 6, background: selectedExhibit === exhibit ? theme.aiGenerated : theme.bgSecondary, border: `1px solid ${theme.border}`, borderRadius: 10, color: textColor, cursor: 'pointer' }}>
                   {getExhibitFullImageUrl(exhibit) && <img src={getExhibitFullImageUrl(exhibit)} alt="" style={{ width: 42, height: 42, borderRadius: 5, objectFit: 'cover' }} />}
                   <span style={{ alignSelf: 'center', fontSize: 13 }}>{getExhibitName(exhibit) || '未命名展品'}</span>
                 </button>
