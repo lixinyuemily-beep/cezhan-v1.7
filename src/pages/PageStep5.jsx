@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
 import {
   getExhibitImage,
@@ -7,6 +7,8 @@ import {
   getExhibitPlace,
   getExhibitTime,
 } from '../utils/exhibitFields';
+
+const GalleryPreview = lazy(() => import('../components/GalleryPreview').then(({ GalleryPreview: component }) => ({ default: component })));
 
 export const PageStep5 = ({
   setPage,
@@ -29,6 +31,7 @@ export const PageStep5 = ({
   const [activeSection, setActiveSection] = useState('preface');
   const [selectedFormat, setSelectedFormat] = useState('PDF');
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showGalleryPreview, setShowGalleryPreview] = useState(false);
   const infoCardStyle = {
     padding: "14px 16px",
     borderRadius: 16,
@@ -173,6 +176,11 @@ export const PageStep5 = ({
   };
 
   const currentSection = getSectionContent(activeSection);
+  const gallerySections = unitsData.map((unit, index) => ({
+    id: String(index),
+    ...getSectionContent(String(index)),
+    title: unit.tag ? `${unit.tag}：${unit.title}` : unit.title,
+  }));
 
   const getExhibitId = (exhibit) => (
     exhibit?.id || exhibit?.ID || exhibit?.编号 || exhibit?.exhibit_id || exhibit?.original_index || ''
@@ -473,6 +481,7 @@ export const PageStep5 = ({
             ))}
             <Divider />
             <div style={{ padding: "10px 16px 14px" }}>
+              <Btn small onClick={() => setShowGalleryPreview(true)} style={{ width: "100%", marginBottom: 8 }}>展厅预览</Btn>
               <Btn small onClick={() => setShowExport(true)} style={{ width: "100%" }}>⬇ 导出大纲</Btn>
             </div>
           </Card>
@@ -558,6 +567,17 @@ export const PageStep5 = ({
           </div>
         </div>
       </div>
+
+      {showGalleryPreview && (
+        <Suspense fallback={<div role="status">正在加载展厅预览…</div>}>
+          <GalleryPreview
+            title={projectTitle}
+            sections={gallerySections}
+            onClose={() => setShowGalleryPreview(false)}
+            theme={C}
+          />
+        </Suspense>
+      )}
 
       {showExport && (
         <div style={{

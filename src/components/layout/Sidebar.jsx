@@ -96,7 +96,7 @@ export const Sidebar = ({
           boxShadow: "inset 0 1px 1px rgba(255,255,255,0.22)",
         }} />
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: "0.03em", fontFamily: "var(--font-serif)" }}>
-          智能策展助手
+          XR智能策展助手
         </span>
       </div>
       <Divider style={{ margin: "0 0 8px", background: "rgba(255,255,255,.08)" }} />
