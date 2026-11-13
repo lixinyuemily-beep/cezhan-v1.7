@@ -119,7 +119,12 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
     const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 200);
     const roomWidth = 10;
     const laneGap = 3.05;
-    const unitLengths = units.map((entry) => entry.id === 'preface' || entry.id === 'epilogue' ? 7.5 : Math.max(10.8, Math.ceil((entry.exhibits || []).length / 2) * laneGap + 7.5));
+    const sectionGap = 4.5;
+    const unitLengths = units.map((entry) => {
+      if (entry.id === 'preface' || entry.id === 'epilogue') return 3.8 + sectionGap;
+      const pairs = Math.ceil((entry.exhibits || []).length / 2);
+      return (pairs ? 6.5 + (pairs - 1) * laneGap : 5.7) + sectionGap;
+    });
     const totalDepth = Math.max(17, unitLengths.reduce((sum, length) => sum + length, 0) + 4);
     const colorOffset = projectColorOffset(title);
     const locations = [];
@@ -133,14 +138,22 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       const accent = ['#597f87', '#967352', '#677b67', '#7c7393'][(index + colorOffset) % 4];
       const exhibits = entry.exhibits || [];
       const pairs = Math.ceil(exhibits.length / 2);
-      const firstExhibitZ = start - 6.1;
+      const firstExhibitZ = start - 5.35;
+      const markerNear = start + 0.7;
+      const markerFar = entry.id === 'preface' || entry.id === 'epilogue'
+        ? start - 3.8
+        : pairs ? firstExhibitZ - (pairs - 1) * laneGap - 1.15 : start - 5.7;
       locations.push({ start, end, firstExhibitZ, accent });
       for (const side of ['left', 'right']) {
         const wallX = side === 'left' ? -roomWidth / 2 + 0.07 : roomWidth / 2 - 0.07;
+        const facing = side === 'left' ? 1 : -1;
         const fallbackText = entry.id === 'preface' || entry.id === 'epilogue' ? '' : '本单元展示策展方案中的展品与叙事线索。';
         addTextPanel(scene, { title: entry.title, body: plainText(entry.content).slice(0, 280) || fallbackText, accent, titleSize: 47, bodySize: 27 }, wallX, start - 1.38, side, 4.15, 1.9, 2.55);
-        const marker = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.065, length - 0.6), new THREE.MeshBasicMaterial({ color: accent }));
-        marker.position.set(wallX, 0.12, (start + end) / 2);
+        const wallTrim = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.045, 4.15), new THREE.MeshBasicMaterial({ color: accent }));
+        wallTrim.position.set(wallX + facing * 0.025, 3.57, start - 1.38);
+        scene.add(wallTrim);
+        const marker = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.065, markerNear - markerFar), new THREE.MeshBasicMaterial({ color: accent }));
+        marker.position.set(wallX, 0.12, (markerNear + markerFar) / 2);
         scene.add(marker);
       }
       exhibits.forEach((exhibit, exhibitIndex) => {
