@@ -31,7 +31,7 @@ export const PageStep5 = ({
   const [activeSection, setActiveSection] = useState('preface');
   const [selectedFormat, setSelectedFormat] = useState('PDF');
   const [showCompleteModal, setShowCompleteModal] = useState(false);
-  const [showGalleryPreview, setShowGalleryPreview] = useState(false);
+  const [showGalleryPreview, setShowGalleryPreview] = useState(Boolean(currentProject?._openGalleryPreview));
   const infoCardStyle = {
     padding: "14px 16px",
     borderRadius: 16,

@@ -602,7 +602,7 @@ export const PageP0 = ({
     }
   };
 
-  const handleViewOutline = async (project) => {
+  const handleViewOutline = async (project, openGalleryPreview = false) => {
     const actionId = getProjectActionId(project);
     if (!actionId) {
       showToast?.('项目缺少有效 ID，无法打开大纲', 'error');
@@ -614,6 +614,7 @@ export const PageP0 = ({
       if (completedProject) {
         const enrichedProject = {
           ...project,
+          _openGalleryPreview: openGalleryPreview,
           step: 5,
           narrative: completedProject.narrative,
           narrativeOptions: completedProject.narrative_options,
@@ -1147,6 +1148,9 @@ export const PageP0 = ({
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <Btn small onClick={() => handleViewOutline(p)} disabled={isLoadingProject(p)}>
                       {isLoadingProject(p) ? '加载中...' : '查看大纲'}
+                    </Btn>
+                    <Btn small variant="ghost" onClick={() => handleViewOutline(p, true)} disabled={isLoadingProject(p)}>
+                      展厅预览
                     </Btn>
                     <Btn small variant="ghost" onClick={() => handleViewProject(p)} disabled={isLoadingProject(p)}>查看</Btn>
                     <Btn small variant="ghost" onClick={() => handleViewHistory(p)} disabled={isLoadingHistory(p)}>

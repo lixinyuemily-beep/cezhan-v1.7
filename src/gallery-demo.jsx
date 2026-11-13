@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GalleryPreview } from './components/GalleryPreview';
-import { getTheme } from './constants/theme';
+import { PageP0 } from './pages/PageP0';
+import { PageStep5 } from './pages/PageStep5';
+import { Sidebar } from './components/layout/Sidebar';
+import { api } from './api/client';
+import { FONT_SERIF, FONT_UI, getTheme } from './constants/theme';
 
 function sampleImage(title, color) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect width="640" height="480" fill="${color}"/><circle cx="320" cy="210" r="95" fill="#d8c6a6"/><path d="M230 280h180l40 100H190z" fill="#705d48"/><text x="320" y="435" text-anchor="middle" font-size="28" fill="#25364a">${title}</text></svg>`;
@@ -31,13 +34,61 @@ const sections = [
   },
 ];
 
+const units = sections.map((section) => ({ id: `unit-${Number(section.id) + 1}`, tag: `第${Number(section.id) + 1}单元`, title: section.title.split('：')[1] }));
+const keptExhibits = Object.fromEntries(sections.map((section, index) => [units[index].id, section.exhibits]));
+const textSections = [
+  { key: 'preface', title: '序言', text: '<p>从器物出发，观察生活与文化的联系。</p>' },
+  ...sections.map((section, index) => ({ key: units[index].id, title: units[index].title, text: `<p>${section.content}</p>` })),
+  { key: 'epilogue', title: '尾声', text: '<p>在展品的对照中回望文化的延续。</p>' },
+];
+const project = {
+  id: 'gallery-preview-sample', projectId: 'gallery-preview-sample',
+  title: '示例策展方案', step: 5, status: 'completed', time: '演示数据',
+  narrative: { title: '示例策展方案' }, units, keptExhibits, textSections,
+  uploadedExhibits: Object.values(keptExhibits).flat(),
+};
+
+api.projects.getCompleted = async () => ({
+  narrative: project.narrative,
+  units,
+  kept_exhibits: keptExhibits,
+  text_sections: textSections,
+  uploaded_exhibits: project.uploadedExhibits,
+  exhibition_title: project.title,
+});
+
 function Demo() {
-  const [open, setOpen] = useState(true);
   const theme = getTheme(false);
-  return open ? (
-    <GalleryPreview title="示例策展方案" sections={sections} theme={theme} onClose={() => setOpen(false)} />
-  ) : (
-    <main style={{ padding: 40, fontFamily: 'sans-serif' }}><h1>展厅预览演示</h1><p>此页使用示例数据；实际功能从完整大纲读取项目内容。</p><button onClick={() => setOpen(true)}>重新打开预览</button></main>
+  const [currentPage, setCurrentPage] = useState('p0');
+  const [currentProject, setCurrentProject] = useState(null);
+  const [activeUnits, setUnits] = useState(units);
+  const [activeExhibits, setKeptExhibits] = useState(keptExhibits);
+  const [activeTexts, setTextSections] = useState(textSections);
+  const [showExport, setShowExport] = useState(false);
+  const [warningVisible, setWarningVisible] = useState(false);
+  const openProject = (loadedProject) => {
+    setCurrentProject(loadedProject);
+    setUnits(loadedProject.units || []);
+    setKeptExhibits(loadedProject.keptExhibits || {});
+    setTextSections(loadedProject.textSections || []);
+    setCurrentPage('step5');
+  };
+  const backToProjects = () => { setCurrentProject(null); setCurrentPage('p0'); };
+
+  return (
+    <div style={{ minHeight: '100vh', background: theme.bgPrimary, color: theme.textPrimary, fontFamily: 'var(--font-ui)' }}>
+      <style>{`:root{--font-ui:${FONT_UI};--font-serif:${FONT_SERIF}}*{box-sizing:border-box}body{margin:0;background:${theme.bgPrimary}}`}</style>
+      <Sidebar currentPage={currentPage} currentStep={5} currentProject={currentProject} navigateTo={backToProjects} createNewProject={() => {}} theme={theme} />
+      <div style={{ marginLeft: 232, paddingTop: 52 }}>
+        <div style={{ position: 'fixed', top: 0, left: 232, right: 0, zIndex: 90, height: 52, background: theme.bgElevated, borderBottom: `1px solid ${theme.border}`, padding: '16px 36px', fontWeight: 700 }}>XR智能策展助手</div>
+        <div style={{ padding: '9px 36px', fontSize: 12, background: theme.humanEdited, color: theme.textSecondary }}>本地演示使用示例项目数据；真实项目会读取已保存的大纲与展品。</div>
+        {currentPage === 'p0' ? (
+          <PageP0 projects={[]} completedProjects={[project]} navigateTo={setCurrentPage} openProject={openProject} createNewProject={() => {}} setProjects={() => {}} setCompletedProjects={() => {}} showToast={() => {}} refreshProjects={() => {}} setCurrentStep={() => {}} setCurrentPage={setCurrentPage} isLoggedIn theme={theme} />
+        ) : (
+          <PageStep5 setPage={setCurrentPage} goPrevStep={backToProjects} warningVisible={warningVisible} setWarningVisible={setWarningVisible} showExport={showExport} setShowExport={setShowExport} completeProject={backToProjects} currentProject={currentProject} theme={theme} keptExhibits={activeExhibits} setKeptExhibits={setKeptExhibits} units={activeUnits} setUnits={setUnits} textSections={activeTexts} setTextSections={setTextSections} />
+        )}
+      </div>
+    </div>
   );
 }
 
