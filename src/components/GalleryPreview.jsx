@@ -9,6 +9,12 @@ function plainText(html = '') {
   return node.body.textContent?.replace(/\s+/g, ' ').trim() || '';
 }
 
+function projectColorOffset(title) {
+  let value = 0;
+  for (const character of String(title || '')) value = (value * 31 + character.codePointAt(0)) >>> 0;
+  return value % 4;
+}
+
 function wrapLines(context, text, maxWidth, maxLines) {
   const lines = [];
   let line = '';
@@ -113,6 +119,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
     const laneGap = 3.05;
     const unitLengths = units.map((entry) => Math.max(8.2, Math.ceil((entry.exhibits || []).length / 2) * laneGap + 4.1));
     const totalDepth = Math.max(17, unitLengths.reduce((sum, length) => sum + length, 0) + 4);
+    const colorOffset = projectColorOffset(title);
     const locations = [];
     const selectable = [];
     const loader = new THREE.TextureLoader();
@@ -121,7 +128,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       const length = unitLengths[index];
       const start = cursor;
       const end = cursor - length;
-      const accent = ['#597f87', '#967352', '#677b67', '#7c7393'][index % 4];
+      const accent = ['#597f87', '#967352', '#677b67', '#7c7393'][(index + colorOffset) % 4];
       const exhibits = entry.exhibits || [];
       const pairs = Math.ceil(exhibits.length / 2);
       const firstExhibitZ = start - 3.65;
@@ -237,7 +244,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
       focusUnit.current = null;
       focusExhibit.current = null;
     };
-  }, [units, vrSupported]);
+  }, [title, units, vrSupported]);
 
   useEffect(() => {
     const onKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
