@@ -72,11 +72,15 @@ function addTextPanel(scene, options, x, z, side, width, height, y) {
 
 function addExhibit(scene, exhibit, x, z, side, loader, selectable) {
   const facing = side === 'left' ? 1 : -1;
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.82, 1.72), new THREE.MeshStandardMaterial({ color: 0x8c755e, roughness: 0.8 }));
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.82, 1.72), new THREE.MeshStandardMaterial({ color: 0x6e5a47, roughness: 0.82 }));
   frame.position.set(x, 2.28, z);
   scene.add(frame);
+  const mat = new THREE.Mesh(new THREE.PlaneGeometry(1.64, 1.72), new THREE.MeshBasicMaterial({ color: 0xeee9df, side: THREE.DoubleSide }));
+  mat.position.set(x + facing * 0.062, 2.31, z);
+  mat.rotation.y = side === 'left' ? Math.PI / 2 : -Math.PI / 2;
+  scene.add(mat);
   const image = new THREE.Mesh(new THREE.PlaneGeometry(1.57, 1.58), new THREE.MeshBasicMaterial({ color: 0xe9e5dc, side: THREE.DoubleSide }));
-  image.position.set(x + facing * 0.065, 2.33, z);
+  image.position.set(x + facing * 0.072, 2.33, z);
   image.rotation.y = side === 'left' ? Math.PI / 2 : -Math.PI / 2;
   image.userData.exhibit = exhibit;
   scene.add(image);
@@ -88,6 +92,12 @@ function addExhibit(scene, exhibit, x, z, side, loader, selectable) {
   if (url) loader.load(url, (texture) => {
     texture.colorSpace = THREE.SRGBColorSpace;
     if (!image.material) { texture.dispose(); return; }
+    const imageRatio = texture.image.width / texture.image.height;
+    const frameRatio = 1.57 / 1.58;
+    if (Number.isFinite(imageRatio) && imageRatio > 0) {
+      if (imageRatio > frameRatio) image.scale.y = frameRatio / imageRatio;
+      else image.scale.x = imageRatio / frameRatio;
+    }
     image.material.map = texture;
     image.material.color.set(0xffffff);
     image.material.needsUpdate = true;
@@ -153,7 +163,7 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
         wallTrim.position.set(wallX + facing * 0.025, 3.57, start - 1.38);
         scene.add(wallTrim);
         const marker = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.065, markerNear - markerFar), new THREE.MeshBasicMaterial({ color: accent }));
-        marker.position.set(wallX, 0.12, (markerNear + markerFar) / 2);
+        marker.position.set(wallX + facing * 0.07, 0.13, (markerNear + markerFar) / 2);
         scene.add(marker);
       }
       exhibits.forEach((exhibit, exhibitIndex) => {
@@ -180,18 +190,43 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
     controls.maxDistance = Math.max(30, totalDepth);
     controls.maxPolarAngle = Math.PI * 0.62;
     controls.update();
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xbab0a1, 2.2));
-    const ceilingLight = new THREE.DirectionalLight(0xffffff, 2.3);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xbab0a1, 1.8));
+    const ceilingLight = new THREE.DirectionalLight(0xfff8ec, 1.7);
     ceilingLight.position.set(0, 7, 3);
     scene.add(ceilingLight);
     const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf1ede5, roughness: 1 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, totalDepth), new THREE.MeshStandardMaterial({ color: 0xc8b8a2, roughness: 0.95 }));
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, totalDepth), new THREE.MeshStandardMaterial({ color: 0xd5cabb, roughness: 0.92 }));
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, totalDepth), new THREE.MeshBasicMaterial({ color: 0xf4f1eb, side: THREE.DoubleSide }));
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.y = 5;
     scene.add(ceiling);
+    const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xc5b8a6, roughness: 0.9 });
+    const trackMaterial = new THREE.MeshStandardMaterial({ color: 0x5f625e, roughness: 0.72 });
+    const lampMaterial = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
+    for (const side of [-1, 1]) {
+      const baseboard = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.16, totalDepth), trimMaterial);
+      baseboard.position.set(side * (roomWidth / 2 - 0.035), 0.08, 0);
+      scene.add(baseboard);
+      const track = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.045, totalDepth - 0.8), trackMaterial);
+      track.position.set(side * 3.65, 4.91, 0);
+      scene.add(track);
+      for (let z = -totalDepth / 2 + 2.5; z < totalDepth / 2 - 1.5; z += 3.5) {
+        const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.16, 12), trackMaterial);
+        housing.position.set(side * 3.65, 4.78, z);
+        scene.add(housing);
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.145, 0.145, 0.012, 12), lampMaterial);
+        lens.position.set(side * 3.65, 4.69, z);
+        scene.add(lens);
+      }
+    }
+    const seamMaterial = new THREE.MeshBasicMaterial({ color: 0xc5bbad });
+    for (let z = -totalDepth / 2 + 3.5; z < totalDepth / 2 - 2; z += 4.2) {
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(roomWidth - 0.25, 0.003, 0.012), seamMaterial);
+      seam.position.set(0, 0.006, z);
+      scene.add(seam);
+    }
     for (const side of [-1, 1]) {
       const wall = new THREE.Mesh(new THREE.PlaneGeometry(totalDepth, 5), wallMaterial);
       wall.position.set(side * roomWidth / 2, 2.5, 0);
