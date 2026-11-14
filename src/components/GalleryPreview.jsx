@@ -303,28 +303,37 @@ export function GalleryPreview({ title, sections, onClose, theme }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
+  const sectionName = (entry) => entry.id === 'preface' ? '序言' : entry.title;
+  const sectionText = unit ? plainText(unit.content) : '';
+
   return (
     <div role="dialog" aria-modal="true" aria-label="展厅预览" style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(18,29,38,.72)', padding: 20, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ width: 'min(1440px,100%)', height: 'min(850px,100%)', background: theme.bgPrimary, borderRadius: 20, overflow: 'hidden', display: 'flex', flexDirection: 'column', color: theme.textPrimary }}>
-        <header style={{ padding: '16px 22px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
-          <div><strong style={{ fontSize: 18 }}>{title} · 展厅预览</strong><div style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>根据当前大纲与展品生成的概念展厅 · 同一方案保持相同布局</div></div>
-          <button type="button" onClick={onClose} style={{ border: `1px solid ${theme.border}`, background: theme.bgSecondary, color: theme.textPrimary, borderRadius: 10, padding: '8px 14px', cursor: 'pointer' }}>关闭预览</button>
+        <header style={{ padding: '18px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'flex-start' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: theme.textSecondary, marginBottom: 5 }}>展厅预览</div>
+            <h1 style={{ fontSize: 19, lineHeight: 1.4, fontWeight: 700, margin: 0, overflowWrap: 'anywhere' }}>{title}</h1>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭预览" title="关闭预览" style={{ width: 36, height: 36, flex: '0 0 36px', display: 'grid', placeItems: 'center', border: `1px solid ${theme.border}`, background: theme.bgSecondary, color: theme.textPrimary, borderRadius: 10, fontSize: 23, lineHeight: 1, cursor: 'pointer' }}><span aria-hidden="true">×</span></button>
         </header>
         {unit ? (
           <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(260px,320px)' }}>
             <div style={{ position: 'relative', minHeight: 0, background: '#ece9e3' }}>
               <div ref={canvasHost} style={{ width: '100%', height: '100%' }} />
-              <div style={{ position: 'absolute', left: 16, bottom: 16, padding: '8px 12px', borderRadius: 9, background: 'rgba(255,255,255,.9)', color: '#263442', fontSize: 12 }}>拖动查看 · 滚轮缩放 · 点击展品查看资料</div>
+              <div style={{ position: 'absolute', left: 16, bottom: 16, padding: '8px 12px', borderRadius: 9, background: 'rgba(255,255,255,.9)', color: '#263442', fontSize: 12 }}>支持拖动查看与滚轮缩放</div>
             </div>
-            <aside style={{ padding: 20, overflowY: 'auto', borderLeft: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: 12, color: theme.textSecondary }}>共享展厅 · {units.filter((entry) => entry.id !== 'preface' && entry.id !== 'epilogue').length} 个单元</div>
-              <div style={{ display: 'grid', gap: 6, margin: '12px 0 18px' }}>
-                {units.map((entry, index) => <button key={`${entry.id}-${index}`} type="button" onClick={() => { setUnitIndex(index); setSelectedExhibit(null); focusUnit.current?.(index); }} style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 9, border: `1px solid ${theme.border}`, background: index === unitIndex ? theme.aiGenerated : theme.bgSecondary, color: theme.textPrimary, cursor: 'pointer' }}>{entry.title}</button>)}
+            <aside style={{ padding: '22px 20px', overflowY: 'auto', borderLeft: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', color: theme.textSecondary }}>单元定位</div>
+              <nav aria-label="单元定位" style={{ display: 'grid', gap: 6, margin: '12px 0 22px' }}>
+                {units.map((entry, index) => <button key={`${entry.id}-${index}`} type="button" aria-current={index === unitIndex ? 'true' : undefined} onClick={() => { setUnitIndex(index); setSelectedExhibit(null); focusUnit.current?.(index); }} style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 9, border: `1px solid ${theme.border}`, borderLeft: index === unitIndex ? '3px solid #557c86' : `3px solid ${theme.border}`, background: index === unitIndex ? theme.aiGenerated : theme.bgSecondary, color: theme.textPrimary, fontSize: 13, lineHeight: 1.45, fontWeight: index === unitIndex ? 700 : 500, cursor: 'pointer' }}>{sectionName(entry)}</button>)}
+              </nav>
+              <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', color: theme.textSecondary, marginBottom: 8 }}>当前章节</div>
+                <h2 style={{ fontSize: 18, lineHeight: 1.5, margin: '0 0 10px', overflowWrap: 'anywhere' }}>{sectionName(unit)}</h2>
+                <p style={{ fontSize: 13, lineHeight: 1.8, color: theme.textSecondary, margin: '0 0 18px' }}>{sectionText || '暂无章节说明'}</p>
               </div>
-              <h2 style={{ fontSize: 19, margin: '8px 0 10px' }}>{unit.title}</h2>
-              <p style={{ fontSize: 13, lineHeight: 1.7, color: theme.textSecondary }}>{plainText(unit.content) || '该单元暂无说明文字。'}</p>
-              {vrSupported ? <div ref={vrHost} style={{ marginBottom: 16 }} /> : <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>支持 WebXR 的设备可进入沉浸式 VR 预览。</div>}
-              {unit.id !== 'preface' && unit.id !== 'epilogue' && <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>{(unit.exhibits || []).length} 件展品 · 点击列表可定位展墙</div>}
+              {vrSupported && <div ref={vrHost} style={{ marginBottom: 18 }} />}
+              {unit.id !== 'preface' && unit.id !== 'epilogue' && <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 18, fontSize: 13, fontWeight: 700, marginBottom: 10 }}>本章节展品 <span style={{ fontSize: 12, fontWeight: 500, color: theme.textSecondary }}>· {(unit.exhibits || []).length} 件</span></div>}
               {(unit.exhibits || []).map((exhibit, index) => <button key={`${getExhibitName(exhibit)}-${index}`} type="button" onClick={() => { setSelectedExhibit(exhibit); focusExhibit.current?.(unitIndex, index); }} style={{ width: '100%', display: 'flex', textAlign: 'left', gap: 9, padding: 8, marginBottom: 6, background: selectedExhibit === exhibit ? theme.aiGenerated : theme.bgSecondary, border: `1px solid ${theme.border}`, borderRadius: 10, color: theme.textPrimary, cursor: 'pointer' }}>
                 {getExhibitFullImageUrl(exhibit) && <img src={getExhibitFullImageUrl(exhibit)} alt="" style={{ width: 42, height: 42, borderRadius: 5, objectFit: 'cover' }} />}
                 <span style={{ alignSelf: 'center', fontSize: 13 }}>{getExhibitName(exhibit) || '未命名展品'}</span>
