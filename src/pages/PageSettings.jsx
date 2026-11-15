@@ -92,7 +92,7 @@ export const PageSettings = ({
           </div>
           <div style={infoCardStyle}>
             <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>当前版本</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>v1.8.0</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>v1.0.0</div>
           </div>
         </div>
       </div>
@@ -191,7 +191,7 @@ export const PageSettings = ({
               关于系统
             </div>
             <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.8 }}>
-              <div style={{ color: C.textPrimary, fontWeight: 700, marginBottom: 8 }}>XR智能策展助手 v1.8.0</div>
+              <div style={{ color: C.textPrimary, fontWeight: 700, marginBottom: 8 }}>智能策展助手 v1.0.0</div>
               <div>
                 面向策展工作流的 AI 协作平台，围绕叙事方向、单元结构、展品推荐、策展文本与完整大纲，提供从方案生成到交付导出的连续支持。
               </div>

@@ -24,7 +24,7 @@ export const Topbar = ({
   const isOnStepPage = currentPage.startsWith('step');
   const completedStep = Math.max(Number(currentProject?.step || 0), Number(currentStep || 0));
   const canExport = completedStep >= 5;
-  const topbarTitle = isOnStepPage ? (currentProject?.title || 'XR智能策展助手') : '';
+  const topbarTitle = isOnStepPage ? (currentProject?.title || '智能策展助手') : '';
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(0);

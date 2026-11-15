@@ -80,7 +80,7 @@ function Demo() {
       <style>{`:root{--font-ui:${FONT_UI};--font-serif:${FONT_SERIF}}*{box-sizing:border-box}body{margin:0;background:${theme.bgPrimary}}`}</style>
       <Sidebar currentPage={currentPage} currentStep={5} currentProject={currentProject} navigateTo={backToProjects} createNewProject={() => {}} theme={theme} />
       <div style={{ marginLeft: 232, paddingTop: 52 }}>
-        <div style={{ position: 'fixed', top: 0, left: 232, right: 0, zIndex: 90, height: 52, background: theme.bgElevated, borderBottom: `1px solid ${theme.border}`, padding: '16px 36px', fontWeight: 700 }}>XR智能策展助手</div>
+        <div style={{ position: 'fixed', top: 0, left: 232, right: 0, zIndex: 90, height: 52, background: theme.bgElevated, borderBottom: `1px solid ${theme.border}`, padding: '16px 36px', fontWeight: 700 }}>智能策展助手</div>
         <div style={{ padding: '9px 36px', fontSize: 12, background: theme.humanEdited, color: theme.textSecondary }}>本地演示使用示例项目数据；真实项目会读取已保存的大纲与展品。</div>
         {currentPage === 'p0' ? (
           <PageP0 projects={[]} completedProjects={[project]} navigateTo={setCurrentPage} openProject={openProject} createNewProject={() => {}} setProjects={() => {}} setCompletedProjects={() => {}} showToast={() => {}} refreshProjects={() => {}} setCurrentStep={() => {}} setCurrentPage={setCurrentPage} isLoggedIn theme={theme} />
