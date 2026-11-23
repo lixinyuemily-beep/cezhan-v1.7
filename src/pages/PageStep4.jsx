@@ -1,3 +1,5 @@
+import { assessExhibitEvidence } from '../utils/exhibitEvidence';
+import { ReviewSummary } from '../components/ReviewSummary';
 import { buildExhibitLocations, exhibitImpact, findReferenceChanges, removeObsoleteDescriptions } from '../utils/exhibitImpact';
 import { useState, useRef, useEffect } from 'react';
 import { ExhibitReferences } from '../components/ExhibitReferences';
@@ -510,6 +512,41 @@ export const PageStep4 = ({
     return added.length > 0 || removed.length > 0 || referenceChangesFor(section).length > 0;
   };
 
+  const notices = textSections.flatMap(section => {
+    const noticesForSection = [];
+    const add = (type, grade, label) => noticesForSection.push({
+      id: `${section.key}:${type}`, key: section.key, title: section.title, type, grade, label,
+    });
+    if (hasImpact(section)) add('impact', 'blocking', '展品配置或引用有变更');
+    if (needsRepair(section)) add('repair', 'blocking', '文本生成失败或为空');
+    if (condition) {
+      const entries = groupForSection(section)?.exhibits || [];
+      const states = entries.map((entry, index) => assessExhibitEvidence(
+        entry, condition === 'model'
+          ? section.exhibitSourceChoices?.[String(entry.id || entry.编号 || `index-${index}`)] : undefined,
+      ).state);
+      const missing = states.filter(state => state === 'missing').length;
+      const conflicts = states.filter(state => state === 'conflict').length;
+      const unverified = (section.exhibits || []).filter(item => item.curatorReviewed || item.reviewStatus === 'pending')
+        .filter(item => !item.judgments?.length || item.judgments.some(judgment => !judgment.references?.length)).length;
+      if (conflicts) add('source_conflict', 'warning', `${conflicts} 件展品的资料有冲突`);
+      if (missing) add('source_missing', 'warning', `${missing} 件展品缺少说明资料`);
+      if (unverified) add('unverified', 'warning', `${unverified} 条展品说明有待核实的依据`);
+    }
+    if (!needsRepair(section) && needsReview(section)) add('pending', 'info', '正文或展品说明待审阅');
+    return noticesForSection;
+  });
+
+  const openNotice = notice => {
+    const section = document.getElementById(`review-section-${notice.key}`);
+    section?.focus();
+    section?.scrollIntoView({ block: 'start' });
+    logReview('notice', {
+      scope: { section_key: notice.key }, category: notice.type, grade: notice.grade,
+      presentation: 'stage_summary', outcome: 'opened',
+    });
+  };
+
   const saveReference = async (section, reference, action) => {
     const references = (section.exhibitReferences || []).filter(item => item.key !== reference.key);
     const location = exhibitLocations.get(reference.key);
@@ -666,6 +703,8 @@ export const PageStep4 = ({
 
       {errorMessage && !preview && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
 
+      {!isGenerating && <ReviewSummary notices={notices} onOpen={openNotice} C={C} />}
+
       {textSections.map((sec) => {
         const ownGroup = groupForSection(sec);
         const sectionExhibits = ownGroup?.exhibits || [];
@@ -677,7 +716,8 @@ export const PageStep4 = ({
         );
         const requiresImpactReview = affected || referenceChanges.length > 0;
         return (
-        <div key={sec.key} style={{
+        <div key={sec.key} id={`review-section-${sec.key}`} tabIndex={-1} style={{
+          scrollMarginTop: 72,
           marginBottom: 24,
           borderRadius: 22,
           border: `1px solid ${C.border}`,
