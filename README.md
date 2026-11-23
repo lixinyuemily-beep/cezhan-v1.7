@@ -28,6 +28,10 @@ npm run dev
 
 前端开发环境默认通过 Vite 代理把请求转发到 `http://localhost:8000`。
 
+### 无后端预览展厅
+
+检查项目内的预览流程时，运行 `npm install` 和 `npm run dev`，打开 `http://localhost:5173/gallery-demo.html`，在“我的项目”的已完成卡片上点击“展厅预览”。该页面使用示例项目数据，不会写入数据库；正式功能从已保存项目读取单元、展品和策展文本。实际入口位于已完成项目卡片和“完整大纲”页。沉浸式 VR 入口需要支持 WebXR 的浏览器和设备；本地开发可使用 localhost，正式部署需 HTTPS。
+
 ## 生产启动
 
 ```bash
