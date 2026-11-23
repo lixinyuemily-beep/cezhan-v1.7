@@ -235,7 +235,11 @@ def _build_exhibit_description(entry, exhibit):
 @router.post("/exhibit-descriptions")
 async def write_exhibit_descriptions(request: ExhibitWritingRequest):
     if request.action == "infer_rule":
-        prompt = "从策展人编辑前后的样稿归纳可沿用的表达写法。排除针对单件展品的事实与解释，只输出简明写法。"
+        prompt = (
+            "逐项归纳策展人编辑样稿时作出的表达调整。每条给出写法和是否可迁移到其他展品。"
+            "只针对该件展品的事实或术语解释设为 reusable=false，禁止补造内容。"
+            '只返回 JSON 数组，例如 [{"text":"年代放在第一句","reusable":true}]。'
+        )
         context = {"original": request.original, "edited": request.edited}
     else:
         if not request.exhibits:
@@ -258,7 +262,20 @@ async def write_exhibit_descriptions(request: ExhibitWritingRequest):
     )
     content = str(result.get("content") or "").strip()
     if request.action == "infer_rule":
-        return content
+        try:
+            suggestions = json.loads(ai_service._strip_json_fence(content))
+            if not isinstance(suggestions, list):
+                raise ValueError("expected a list")
+            rules = [
+                {"text": item["text"].strip(), "reusable": item.get("reusable") is True}
+                for item in suggestions[:12]
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+            ]
+            if rules:
+                return {"rules": rules}
+        except (ValueError, TypeError):
+            pass
+        raise HTTPException(status_code=502, detail="未能逐项归纳写法，请重试")
     try:
         entries = json.loads(ai_service._strip_json_fence(content))
         exhibits = {str(item["entryKey"]): item for item in request.exhibits}

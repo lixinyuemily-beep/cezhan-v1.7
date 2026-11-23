@@ -7,7 +7,8 @@ import { Btn } from './ui';
 
 export function ExhibitWriting({ section, exhibits, condition, sharedRules, save, log, C }) {
   const [sample, setSample] = useState(null);
-  const [ruleDraft, setRuleDraft] = useState('');
+  const [ruleDraft, setRuleDraft] = useState([]);
+  const [handoff, setHandoff] = useState(null);
   const [ruleScope, setRuleScope] = useState('unit');
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -94,6 +95,12 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       if (items.length !== target.length || target.some(record => !items.some(item => item.key === record.entryKey && item.text?.trim()))) {
         throw new Error('返回的条目与所选展品不一致，请重新生成。');
       }
+      if (!fixed) setHandoff({
+        drafted: items.length,
+        suspended: conflicting.length + heldKeys.length,
+        missing: missing.length,
+        next: kind === 'sample' ? '请修改试写样稿，再归纳写法。' : '请预览本次生成的说明，并选择要应用的条目。',
+      });
       if (kind === 'sample') {
         setSample({ ...items[0], original: items[0].text });
       } else if (fixed) {
@@ -117,17 +124,19 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     const result = await api.ai.writeExhibitDescriptions({
       action: 'infer_rule', original: sample.original, edited: sample.text,
     });
-    if (!result.trim()) throw new Error('未归纳出可确认的写法。');
-    setRuleDraft(result);
+    const rows = typeof result === 'string' ? [{ text: result, reusable: true }] : result?.rules;
+    if (!rows?.some(row => row.text?.trim())) throw new Error('未归纳出可确认的写法。');
+    setRuleDraft(rows.filter(row => row.text?.trim()).map(row => ({ ...row, selected: row.reusable === true })));
     setConfirmingRule(true);
   });
 
   const confirmRule = async () => {
-    const text = ruleDraft.trim();
+    const chosenRules = ruleDraft.filter(row => row.selected && row.text.trim()).map(row => row.text.trim());
+    const text = chosenRules.join('\n');
     if (!text) return;
     setBusy(true);
     try {
-      const confirmed = { text, scope: ruleScope, source: 'confirmed_sample' };
+      const confirmed = { text, items: chosenRules, scope: ruleScope, source: 'confirmed_sample' };
       const changes = { exhibitWritingSample: {
         key: sample.key, text: sample.text,
         judgments: sample.text === sample.original ? sample.judgments : undefined,
@@ -135,7 +144,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       if (ruleScope === 'unit') changes.exhibitWritingRule = confirmed;
       const nextSharedRules = ruleScope === 'unit' ? undefined : { ...sharedRules, [ruleScope]: confirmed };
       if (!await save(section, changes, nextSharedRules)) return;
-      log('revision', { scope, method: 'confirm_writing_rule', requirement_scope: ruleScope });
+      log('revision', { scope, method: 'confirm_writing_rule', requirement_scope: ruleScope, selected_count: chosenRules.length, proposed_count: ruleDraft.length });
       if (!rule) log('mode_change', { scope, from: mode, to: 'guided_generation', reason: 'writing_rule_confirmed' });
       setConfirmingRule(false);
     } finally {
@@ -197,7 +206,13 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         </details>
         {rule && <span>当前生效写法（{scopeLabels[rule.scope] || '本单元'}）：{rule.text}</span>}
       </>}
-      <span>本次由人工智能起草，策展人审阅确认。</span>
+      <span>本次由人工智能起草，策展人审阅确认。作用范围为本单元的展品说明。</span>
+      {!fixed && handoff && <section aria-label="本次工作交还">
+        <strong>本次工作交还</strong>
+        <div>已起草 {handoff.drafted} 件，暂缓 {handoff.suspended} 件，缺项 {handoff.missing} 件。</div>
+        <div>{handoff.next}</div>
+        {rule && <div>本次沿用写法：{rule.text}</div>}
+      </section>}
       {observedConflicts.length > 0 && <section aria-label="资料冲突">
         <strong>资料冲突 · {conflicting.length} 件待核对</strong>
         {observedConflicts.map(record => <div key={record.entryKey}>
@@ -242,16 +257,23 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         <Btn small disabled={busy || !sample.text.trim()} onClick={infer}>归纳写法</Btn>
       </>}
       {confirmingRule && <>
-        <label>拟沿用的写法
-          <textarea style={{ display: 'block', width: '100%' }} rows={3} value={ruleDraft} disabled={busy}
-            onChange={event => setRuleDraft(event.target.value)} />
-        </label>
+        <fieldset disabled={busy}>
+          <legend>逐项选择拟沿用的写法</legend>
+          {ruleDraft.map((row, index) => <div key={index} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <label><input type="checkbox" checked={row.selected}
+              onChange={event => setRuleDraft(items => items.map((item, i) => i === index
+                ? { ...item, selected: event.target.checked } : item))} /> 沿用第 {index + 1} 项</label>
+            <input aria-label={`写法第 ${index + 1} 项`} style={{ flex: 1 }} value={row.text}
+              onChange={event => setRuleDraft(items => items.map((item, i) => i === index
+                ? { ...item, text: event.target.value } : item))} />
+          </div>)}
+        </fieldset>
         <label>沿用范围{' '}
           <select value={ruleScope} disabled={busy} onChange={event => setRuleScope(event.target.value)}>
             {Object.entries(scopeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
-        <Btn small disabled={busy || !ruleDraft.trim()} onClick={confirmRule}>确认写法</Btn>
+        <Btn small disabled={busy || !ruleDraft.some(row => row.selected && row.text.trim())} onClick={confirmRule}>确认写法</Btn>
       </>}
       {candidates.length > 0 && <>
         <strong>{fixed ? '已确认文字的修改建议' : '逐条预览'}</strong>
