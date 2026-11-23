@@ -33,3 +33,29 @@ export function removeObsoleteDescriptions(descriptions, removed, next) {
     return !removedNames.has(name) || activeNames.has(name);
   });
 }
+
+export function buildExhibitLocations(groups) {
+  const locations = new Map();
+  for (const group of groups) {
+    for (const item of snapshotExhibits(group.exhibits)) {
+      if (!locations.has(item.key)) locations.set(item.key, { ...item, units: [] });
+      const entry = locations.get(item.key);
+      if (!entry.units.some(unit => unit.key === group.key)) {
+        entry.units.push({ key: group.key, title: group.title });
+      }
+    }
+  }
+  return locations;
+}
+
+export function findReferenceChanges(references, locations) {
+  return (references || []).flatMap(reference => {
+    const current = locations.get(reference.key);
+    const units = current?.units || [];
+    const previous = reference.units || [];
+    const unchanged = previous.length === units.length && previous.every(old =>
+      units.some(unit => unit.key === old.key && unit.title === old.title)
+    );
+    return unchanged ? [] : [{ reference, current, previous, units }];
+  });
+}

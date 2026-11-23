@@ -1,5 +1,6 @@
-import { exhibitImpact, removeObsoleteDescriptions } from '../utils/exhibitImpact';
+import { buildExhibitLocations, exhibitImpact, findReferenceChanges, removeObsoleteDescriptions } from '../utils/exhibitImpact';
 import { useState, useRef, useEffect } from 'react';
+import { ExhibitReferences } from '../components/ExhibitReferences';
 import { ExhibitWriting } from '../components/ExhibitWriting';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
 import { api } from '../api/client';
@@ -484,15 +485,44 @@ export const PageStep4 = ({
     }
   };
 
-  const impactFor = (section) => {
-    if (section.key === 'preface' || section.key === 'epilogue') return { added: [], removed: [], next: [] };
-    const regularUnits = (units || []).filter(unit => unit.tag !== '序章' && unit.tag !== '尾声');
-    return exhibitImpact(section, exhibitsForKey(section.key, regularUnits[Number(section.key)]));
+  const exhibitGroups = (units || []).filter(unit => unit.tag !== '序章' && unit.tag !== '尾声')
+    .map((unit, index) => ({
+      key: unit.id != null || unit.unit_id != null ? `unit:${unit.id ?? unit.unit_id}` : `position:${index}`,
+      title: unit.title || `第${index + 1}单元`,
+      exhibits: exhibitsForKey(String(index), unit),
+    }));
+  const exhibitLocations = buildExhibitLocations(exhibitGroups);
+
+  const groupForSection = section => {
+    if (section.key === 'preface' || section.key === 'epilogue') return null;
+    const explicitKey = `unit:${section.unitId ?? section.key}`;
+    if (section.unitId != null) return exhibitGroups.find(group => group.key === explicitKey);
+    if (/^\d+$/.test(String(section.key))) return exhibitGroups[Number(section.key)];
+    return exhibitGroups.find(group => group.key === explicitKey);
   };
+
+  const impactFor = section => exhibitImpact(section, groupForSection(section)?.exhibits || []);
+
+  const referenceChangesFor = section => findReferenceChanges(section.exhibitReferences, exhibitLocations);
 
   const hasImpact = section => {
     const { added, removed } = impactFor(section);
-    return added.length > 0 || removed.length > 0;
+    return added.length > 0 || removed.length > 0 || referenceChangesFor(section).length > 0;
+  };
+
+  const saveReference = async (section, reference, action) => {
+    const references = (section.exhibitReferences || []).filter(item => item.key !== reference.key);
+    const location = exhibitLocations.get(reference.key);
+    if (action !== 'unlink') references.push({
+      key: reference.key, name: location?.name || reference.name, units: location?.units || [],
+    });
+    const saved = await persistSections(textSections.map(item => item === section
+      ? { ...item, exhibitReferences: references, reviewStatus: 'pending' } : item));
+    if (saved) logReview(action === 'add' ? 'revision' : 'impact_review', {
+      scope: { section_key: section.key, relation: 'cross_unit_exhibit', exhibit_key: reference.key },
+      outcome: action,
+    });
+    return saved;
   };
 
   const resolveImpact = async (section, removeDescriptions) => {
@@ -637,10 +667,15 @@ export const PageStep4 = ({
       {errorMessage && !preview && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
 
       {textSections.map((sec) => {
-        const unit = (units || []).filter(item => item.tag !== '序章' && item.tag !== '尾声')[Number(sec.key)];
-        const sectionExhibits = exhibitsForKey(sec.key, unit);
+        const ownGroup = groupForSection(sec);
+        const sectionExhibits = ownGroup?.exhibits || [];
         const impact = impactFor(sec);
         const affected = impact.added.length > 0 || impact.removed.length > 0;
+        const referenceChanges = referenceChangesFor(sec);
+        const referenceChoices = [...exhibitLocations.values()].filter(item =>
+          item.units.some(location => location.key !== ownGroup?.key)
+        );
+        const requiresImpactReview = affected || referenceChanges.length > 0;
         return (
         <div key={sec.key} style={{
           marginBottom: 24,
@@ -656,7 +691,7 @@ export const PageStep4 = ({
                 {sec.title}
               </h2>
               {sec.edited && <Tag label="[已修改]" color={C.humanEdited} textColor={C.accentSecondary} />}
-              {(needsReview(sec) || affected) && <Tag label="待审阅" color={C.aiGenerated} textColor={C.accentPrimary} />}
+              {(needsReview(sec) || requiresImpactReview) && <Tag label="待审阅" color={C.aiGenerated} textColor={C.accentPrimary} />}
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {sec.reviewVersions?.length > 0 && (
@@ -665,7 +700,7 @@ export const PageStep4 = ({
               <Btn small variant="ghost" disabled={saving || editing !== null} onClick={() => handleRegenerate(sec)}>
                 <RefreshIcon /> 重新生成
               </Btn>
-              {sec.reviewStatus !== 'confirmed' && !needsRepair(sec) && !affected && (
+              {sec.reviewStatus !== 'confirmed' && !needsRepair(sec) && !requiresImpactReview && (
                 <Btn small disabled={saving || editing !== null} onClick={() => confirmSection(sec.key)}>确认本段</Btn>
               )}
             </div>
@@ -728,6 +763,11 @@ export const PageStep4 = ({
               </div>
             </section>
           )}
+
+          <ExhibitReferences references={sec.exhibitReferences || []} choices={referenceChoices}
+            changes={referenceChanges} disabled={saving || editing !== null}
+            onAdd={reference => saveReference(sec, reference, 'add')}
+            onReview={(reference, keep) => saveReference(sec, reference, keep ? 'keep' : 'unlink')} />
 
           {condition && sectionExhibits.length > 0 && editing === null && (
             <ExhibitWriting key={`${currentProject?.id}-${sec.key}-${condition}`} section={sec}
