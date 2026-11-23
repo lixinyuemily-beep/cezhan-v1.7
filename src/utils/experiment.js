@@ -13,7 +13,7 @@ export const experimentCondition = project => {
   return condition === 'model' || condition === 'fixed' ? condition : null;
 };
 
-export async function recordInteraction(project, stage, eventType, details = {}) {
+export async function recordInteraction(project, stage, eventType, details = {}, keepalive = false) {
   const condition = experimentCondition(project);
   if (!condition || !project.id) return;
   const event = {
@@ -25,10 +25,10 @@ export async function recordInteraction(project, stage, eventType, details = {})
     details,
   };
   try {
-    await api.projects.addInteractionEvent(project.id, event);
+    await api.projects.addInteractionEvent(project.id, event, keepalive);
   } catch (firstError) {
     try {
-      await api.projects.addInteractionEvent(project.id, event);
+      await api.projects.addInteractionEvent(project.id, event, keepalive);
     } catch (error) {
       console.error('保存实验过程事件失败', error);
       window.dispatchEvent(new Event('experiment-event-save-failed'));

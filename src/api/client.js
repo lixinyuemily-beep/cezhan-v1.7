@@ -169,7 +169,12 @@ export const api = {
     create: (data) => apiClient.post('/projects', data),
     update: (projectId, data) => apiClient.put(`/projects/${projectId}`, data),
     delete: (projectId) => apiClient.delete(`/projects/${projectId}`),
-    addInteractionEvent: (projectId, event) => apiClient.post(`/projects/${projectId}/interaction-events`, event),
+    getInteractionEvents: (projectId) => apiClient.get(`/projects/${projectId}/interaction-events`),
+    addInteractionEvent: (projectId, event, keepalive = false) => apiClient.post(
+      `/projects/${projectId}/interaction-events`,
+      event,
+      keepalive ? { adapter: 'fetch', fetchOptions: { keepalive: true } } : undefined,
+    ),
     versions: (projectId) => apiClient.get(`/projects/${projectId}/versions`),
     getUnits: (projectId) => apiClient.get(`/projects/${projectId}/units`),
     createUnit: (data) => apiClient.post('/projects/units', data),

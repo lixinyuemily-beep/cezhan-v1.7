@@ -55,17 +55,25 @@ function CurationApp() {
   useEffect(() => {
     if (!projectId || !condition || !stage) return;
     const project = { id: projectId, llmParams: { experiment_condition: condition } };
-    const visitId = newInteractionId();
-    void recordInteraction(project, stage, 'stage_start', { visit_id: visitId });
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      void recordInteraction(project, stage, 'stage_end', { visit_id: visitId });
+    let visitId;
+    const start = () => {
+      if (visitId) return;
+      visitId = newInteractionId();
+      void recordInteraction(project, stage, 'stage_start', { visit_id: visitId });
     };
-    window.addEventListener('pagehide', finish, { once: true });
+    const finish = (keepalive = false) => {
+      if (!visitId) return;
+      void recordInteraction(project, stage, 'stage_end', { visit_id: visitId }, keepalive);
+      visitId = null;
+    };
+    const hide = () => finish(true);
+    const restore = event => { if (event.persisted) start(); };
+    start();
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', restore);
     return () => {
-      window.removeEventListener('pagehide', finish);
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', restore);
       finish();
     };
   }, [stage, projectId, condition]);

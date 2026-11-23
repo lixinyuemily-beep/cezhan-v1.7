@@ -1,3 +1,4 @@
+import { ExperimentRecords } from '../components/ExperimentRecords';
 import { ExhibitJudgments } from '../components/ExhibitJudgments';
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
@@ -461,6 +462,8 @@ export const PageStep5 = ({
           </div>
         </div>
       </div>
+
+      <ExperimentRecords key={currentProject?.id} project={currentProject} />
 
       {warningVisible && (
         <div style={{
