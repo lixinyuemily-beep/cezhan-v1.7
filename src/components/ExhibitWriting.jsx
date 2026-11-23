@@ -1,0 +1,175 @@
+import { useState } from 'react';
+import { api } from '../api/client';
+import { getExhibitIntroduction, getExhibitName, normalizeExhibitKeyText } from '../utils/exhibitFields';
+import { Btn } from './ui';
+
+export function ExhibitWriting({ section, exhibits, condition, sharedRules, save, log, C }) {
+  const [sample, setSample] = useState(null);
+  const [ruleDraft, setRuleDraft] = useState('');
+  const [ruleScope, setRuleScope] = useState('unit');
+  const [candidates, setCandidates] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmingRule, setConfirmingRule] = useState(false);
+  const rule = section.exhibitWritingRule || sharedRules.content_type || sharedRules.project;
+  const scopeLabels = { unit: '本单元', content_type: '本项目的展品说明', project: '项目' };
+  const fixed = condition === 'fixed';
+  const records = exhibits.map((exhibit, index) => ({ ...exhibit, name: getExhibitName(exhibit), entryKey: String(exhibit.id || exhibit.编号 || `index-${index}`) }));
+  const mode = fixed || rule ? 'guided_generation' : 'interactive_editing';
+  const scope = { section_key: section.key, content_type: 'exhibit_description' };
+  // Availability is provisional until reference-level checking is added.
+  const available = records.filter(record => record.name && normalizeExhibitKeyText(getExhibitIntroduction(record) || record.intro || record.desc));
+  const missing = records.filter(record => !available.includes(record));
+  const eligible = fixed && instruction.trim() ? available : available.filter(record => !(section.exhibits || []).some(item =>
+    item.curatorReviewed && (item.entryKey ? item.entryKey === record.entryKey : item.name === record.name)
+  ));
+
+  const run = async (action, operation) => {
+    setBusy(true);
+    setError('');
+    log('request_start', {
+      task: 'exhibit_description', scope, action, mode,
+      ...(fixed ? {} : { state: { writing_rule_confirmed: Boolean(rule), available: available.length, missing: missing.length } }),
+    });
+    try {
+      await operation();
+      log('generation_result', { scope, action, outcome: 'ready' });
+    } catch (error) {
+      setError(error.message || '处理失败，请重试。');
+      log('generation_result', { scope, action, outcome: 'failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generate = async kind => {
+    const capturedSample = section.exhibitWritingSample || section.exhibitWritingRule?.sample;
+    const savedSample = !fixed && capturedSample && eligible.some(item => item.entryKey === capturedSample.key)
+      ? capturedSample : null;
+    const target = kind === 'sample' ? eligible.slice(0, 1) : eligible.filter(item => item.entryKey !== savedSample?.key);
+    await run(kind, async () => {
+      const items = target.length ? await api.ai.writeExhibitDescriptions({
+        action: 'draft', exhibits: target, instruction: fixed ? instruction : (rule?.text || ''),
+      }) : [];
+      if (items.length !== target.length || target.some(record => !items.some(item => item.key === record.entryKey && item.text?.trim()))) {
+        throw new Error('返回的条目与所选展品不一致，请重新生成。');
+      }
+      if (kind === 'sample') setSample({ ...items[0], original: items[0].text });
+      else {
+        const preview = savedSample ? [savedSample, ...items] : items;
+        setCandidates(preview);
+        setSelected(preview.map(item => item.key));
+      }
+    });
+  };
+
+  const infer = () => run('infer_rule', async () => {
+    const result = await api.ai.writeExhibitDescriptions({
+      action: 'infer_rule', original: sample.original, edited: sample.text,
+    });
+    if (!result.trim()) throw new Error('未归纳出可确认的写法。');
+    setRuleDraft(result);
+    setConfirmingRule(true);
+  });
+
+  const confirmRule = async () => {
+    const text = ruleDraft.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      const confirmed = { text, scope: ruleScope, source: 'confirmed_sample' };
+      const changes = { exhibitWritingSample: { key: sample.key, text: sample.text } };
+      if (ruleScope === 'unit') changes.exhibitWritingRule = confirmed;
+      const nextSharedRules = ruleScope === 'unit' ? undefined : { ...sharedRules, [ruleScope]: confirmed };
+      if (!await save(section, changes, nextSharedRules)) return;
+      log('revision', { scope, method: 'confirm_writing_rule', requirement_scope: ruleScope });
+      if (!rule) log('mode_change', { scope, from: mode, to: 'guided_generation', reason: 'writing_rule_confirmed' });
+      setConfirmingRule(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    const accepted = candidates.filter(item => selected.includes(item.key));
+    const names = new Set(accepted.map(item => records.find(record => record.entryKey === item.key).name));
+    const summaries = (section.exhibits || []).filter(item => item.entryKey ? !selected.includes(item.entryKey) : !names.has(item.name));
+    summaries.push(...accepted.map(item => ({
+      entryKey: item.key, name: records.find(record => record.entryKey === item.key).name,
+      desc: item.text, curatorReviewed: true,
+    })));
+    setBusy(true);
+    try {
+      if (!await save(section, { exhibits: summaries })) return;
+      log('candidate_disposition', { scope, outcome: 'accepted', selected_keys: selected,
+        discarded_keys: candidates.filter(item => !selected.includes(item.key)).map(item => item.key) });
+      setCandidates([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: 16, border: `1px solid ${C.border}`, marginTop: 12, display: 'grid', gap: 10 }}>
+      <strong>展品说明</strong>
+      {!fixed && <>
+        <span>{rule ? '本单元写法已确认，下一次按写法引导生成。' : '写法待确认，先试写一条供策展人修改。'}</span>
+        {rule && <span>当前生效写法（{scopeLabels[rule.scope] || '本单元'}）：{rule.text}</span>}
+      </>}
+      <span>本次由人工智能起草，策展人审阅确认。</span>
+      {missing.length > 0 && <span>缺少说明资料，暂留空：{missing.map(item => item.name || '未命名展品').join('、')}</span>}
+      {(section.exhibits || []).filter(item => item.curatorReviewed).map(item => (
+        <div key={item.entryKey}><strong>{item.name}</strong>　{item.desc}</div>
+      ))}
+      {fixed && <label>本次修改意见 <input value={instruction} onChange={event => setInstruction(event.target.value)} /></label>}
+      <div>
+        <Btn small disabled={busy || eligible.length === 0 || candidates.length > 0}
+          onClick={() => generate(fixed || rule ? 'batch' : 'sample')}>
+          {busy ? '处理中…' : fixed || rule ? '生成展品说明' : '生成试写样稿'}
+        </Btn>
+      </div>
+      {sample && !fixed && !rule && <>
+        <label>试写样稿
+          <textarea style={{ display: 'block', width: '100%' }} rows={4} value={sample.text} disabled={busy}
+            onChange={event => { setSample({ ...sample, text: event.target.value }); setConfirmingRule(false); }} />
+        </label>
+        <Btn small disabled={busy || !sample.text.trim()} onClick={infer}>归纳写法</Btn>
+      </>}
+      {confirmingRule && <>
+        <label>拟沿用的写法
+          <textarea style={{ display: 'block', width: '100%' }} rows={3} value={ruleDraft} disabled={busy}
+            onChange={event => setRuleDraft(event.target.value)} />
+        </label>
+        <label>沿用范围{' '}
+          <select value={ruleScope} disabled={busy} onChange={event => setRuleScope(event.target.value)}>
+            {Object.entries(scopeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <Btn small disabled={busy || !ruleDraft.trim()} onClick={confirmRule}>确认写法</Btn>
+      </>}
+      {candidates.length > 0 && <>
+        <strong>逐条预览</strong>
+        {candidates.map(item => {
+          const record = records.find(entry => entry.entryKey === item.key);
+          const before = (section.exhibits || []).find(entry => entry.name === record.name)?.desc;
+          return <label key={item.key} style={{ display: 'grid', gap: 4 }}>
+            <span><input type="checkbox" checked={selected.includes(item.key)} disabled={busy}
+              onChange={event => setSelected(event.target.checked ? [...selected, item.key] : selected.filter(key => key !== item.key))} /> {record.name}</span>
+            {before && <span>原文 {before}</span>}
+            <span>候选 {item.text}</span>
+          </label>;
+        })}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn small disabled={busy || !selected.length} onClick={apply}>应用所选条目</Btn>
+          <Btn small variant="ghost" disabled={busy} onClick={() => {
+            log('candidate_disposition', { scope, outcome: 'discarded', discarded_keys: candidates.map(item => item.key) });
+            setCandidates([]);
+          }}>弃用候选</Btn>
+        </div>
+      </>}
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}

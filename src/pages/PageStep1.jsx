@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { experimentCondition, recordInteraction } from '../utils/experiment';
+import { getExhibitIntroduction, getExhibitName, getExhibitTime } from '../utils/exhibitFields';
 import { Card, Btn, Divider } from '../components/ui';
 import { generateUnitStructure } from '../api/curationApi';
 import { api, getReadableApiError } from '../api/client';
@@ -34,8 +36,40 @@ export const PageStep1 = ({
       logic: "请先创建项目",
       units: "-", items: "-" },
   ];
-  const hasSelectedNarrative = selectedNarrative !== null && selectedNarrative !== undefined;
-  const selectedPlan = hasSelectedNarrative ? plans?.[selectedNarrative] : null;
+  const condition = experimentCondition(currentProject);
+  const [comparing, setComparing] = useState(false);
+  const [comparison, setComparison] = useState(null);
+  const [comparisonError, setComparisonError] = useState('');
+  const [fixedInstruction, setFixedInstruction] = useState('');
+  const visiblePlans = condition === 'fixed' ? plans.slice(0, 1) : plans;
+
+  const comparePlans = async () => {
+    setComparing(true);
+    setComparisonError('');
+    const details = { task: 'narrative_direction', mode: 'selection', state: { direction_confirmed: false } };
+    void recordInteraction(currentProject, 1, 'request_start', details);
+    try {
+      const records = (currentProject.llmParams?.exhibits || currentProject.uploadedExhibits || [])
+        .map((item, index) => ({
+          key: String(index), name: getExhibitName(item), date: getExhibitTime(item),
+          description: getExhibitIntroduction(item),
+        })).filter(item => item.name).slice(0, 200);
+      const overviews = await api.ai.compareNarratives({
+        options: plans, records, unit_count: Number(currentProject.llmParams?.advanced_settings?.unitCount || 3),
+      });
+      setComparison({ projectId: currentProject.id, plans, overviews });
+      void recordInteraction(currentProject, 1, 'generation_result', { ...details, outcome: 'ready' });
+    } catch (error) {
+      setComparisonError('方案概要生成失败，请重试。');
+      void recordInteraction(currentProject, 1, 'generation_result', { ...details, outcome: 'failed' });
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const effectiveIndex = condition === 'fixed' ? 0 : selectedNarrative;
+  const selectedPlan = effectiveIndex != null ? visiblePlans[effectiveIndex] : null;
+  const activeComparison = comparison?.projectId === currentProject?.id && comparison?.plans === plans ? comparison.overviews : null;
   const canConfirmNarrative = !!selectedPlan && !isGenerating;
   const displayExhibitionTitle =
     selectedPlan?.title ||
@@ -63,12 +97,18 @@ export const PageStep1 = ({
       return;
     }
 
-    const selectedPlan = hasSelectedNarrative ? currentProject.narrativeOptions?.[selectedNarrative] : null;
     if (!selectedPlan) {
       showToast?.('请先选择一个叙事方向', 'info');
       return;
     }
 
+    const overview = activeComparison?.[effectiveIndex];
+    const addition = [
+      overview?.units?.map(unit => `${unit.title}：${unit.claim}（展品：${unit.exhibits.join('、')}）`).join('\n'),
+      condition === 'fixed' ? fixedInstruction.trim() : '',
+    ].filter(Boolean).join('\n');
+    const confirmedPlan = addition ? { ...selectedPlan, logic: [selectedPlan.logic, addition].join('\n') } : selectedPlan;
+    const nextPlans = plans.map((plan, index) => index === effectiveIndex ? confirmedPlan : plan);
     const projectTitle =
       currentProject?.llmParams?.exhibition_title ||
       currentProject?.exhibitionTitle ||
@@ -79,23 +119,27 @@ export const PageStep1 = ({
       try {
         await api.projects.update(currentProject.id, {
           title: projectTitle,
-          selected_narrative: selectedNarrative,
+          selected_narrative: effectiveIndex,
           step: 2,
-          narrative: selectedPlan,
-          narrative_options: currentProject.narrativeOptions,
+          narrative: confirmedPlan,
+          narrative_options: nextPlans,
         });
       } catch (error) {
         console.error('更新项目失败:', error);
       }
     }
 
+    void recordInteraction(currentProject, 1, 'candidate_disposition', {
+      task: 'narrative_direction', outcome: 'accepted', index: effectiveIndex, revised: Boolean(fixedInstruction.trim()),
+    });
+    setSelectedNarrative(effectiveIndex);
     setGenerationError('');
     setIsGenerating(true);
 
     try {
       const params = {
-        selectedNarrative: selectedNarrative,
-        narrativeOptions: currentProject.narrativeOptions,
+        selectedNarrative: effectiveIndex,
+        narrativeOptions: nextPlans,
         exhibits: currentProject.llmParams.exhibits,
         additional_intent: currentProject.llmParams.additional_intent,
         narrative_rhythm: currentProject.llmParams.narrative_rhythm,
@@ -108,7 +152,9 @@ export const PageStep1 = ({
         const updatedProject = {
           ...currentProject,
           title: projectTitle,
-          selectedNarrative,
+          selectedNarrative: effectiveIndex,
+          narrative: confirmedPlan,
+          narrativeOptions: nextPlans,
           step: 2,
           units: result.data.units,
           textSections: result.data.textSections,
@@ -214,11 +260,11 @@ export const PageStep1 = ({
               选择叙事方向
             </h1>
             <p style={{ color: C.textSecondary, fontSize: 14, margin: "10px 0 0", lineHeight: 1.8, maxWidth: 720 }}>
-              AI 已基于当前展品与策展意图生成叙事方案。你可以直接选择一个作为主线，也可以在此基础上新增自定义方向。
+              {condition === 'fixed' ? '由人工智能起草一份叙事方向，策展人可以补充修改意见。' : 'AI 已基于当前展品与策展意图生成叙事方案。你可以选择一个作为主线，或新增自定义方向。'}
             </p>
           </div>
           <button
-            onClick={handleCustomDirection}
+            onClick={handleCustomDirection} hidden={condition === 'fixed'}
             style={{
               padding: "10px 16px",
               borderRadius: 999,
@@ -278,25 +324,47 @@ export const PageStep1 = ({
         </div>
       </div>
 
+      {condition === 'fixed' && <label style={{ display: 'block', marginBottom: 16 }}>
+        叙事方向修改意见 <input value={fixedInstruction} onChange={event => setFixedInstruction(event.target.value)} />
+      </label>}
+      {condition === 'model' && plans.length > 1 && (
+        <div style={{ marginBottom: 16 }}>
+          <Btn small disabled={comparing} onClick={comparePlans}>{comparing ? '正在生成概要…' : '对照方案概要'}</Btn>
+          {comparisonError && <p role="alert">{comparisonError}</p>}
+          {activeComparison && <div style={{ overflowX: 'auto', marginTop: 12 }}>
+            <table style={{ width: '100%', textAlign: 'left' }}>
+              <thead><tr><th>比较维度</th>{plans.map((plan, index) => <th key={index}>{plan.label} {plan.title}</th>)}</tr></thead>
+              <tbody>
+                <tr><th>单元划分</th>{activeComparison.map((item, index) => <td key={index}>{item.units.map(unit => unit.title).join('、')}</td>)}</tr>
+                <tr><th>各单元论点</th>{activeComparison.map((item, index) => <td key={index}>{item.units.map(unit => <p key={unit.title}>{unit.title}：{unit.claim}</p>)}</td>)}</tr>
+                <tr><th>拟用展品</th>{activeComparison.map((item, index) => <td key={index}>{item.units.map(unit => <p key={unit.title}>{unit.title}：{unit.exhibits.join('、') || '待补充'}</p>)}</td>)}</tr>
+                <tr><th>资料缺口</th>{activeComparison.map((item, index) => <td key={index}>{item.gaps.join('；') || '本次未标出'}</td>)}</tr>
+                <tr><th>选择</th>{activeComparison.map((_, index) => <td key={index}><Btn small onClick={() => handleSelectPlan(index)}>选择{plans[index].label}</Btn></td>)}</tr>
+              </tbody>
+            </table>
+          </div>}
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18 }}>
-        {plans.map((p, i) => (
-          <Card key={i} highlighted={selectedNarrative === i} style={{
+        {visiblePlans.map((p, i) => (
+          <Card key={i} highlighted={effectiveIndex === i} style={{
             cursor: "pointer",
             height: "100%",
             overflow: "hidden",
-            borderColor: selectedNarrative === i ? `${C.accentPrimary}38` : `${C.border}`,
-            boxShadow: selectedNarrative === i ? "0 20px 42px rgba(38, 72, 112, 0.10)" : "0 12px 26px rgba(15, 23, 42, 0.04)",
+            borderColor: effectiveIndex === i ? `${C.accentPrimary}38` : `${C.border}`,
+            boxShadow: effectiveIndex === i ? "0 20px 42px rgba(38, 72, 112, 0.10)" : "0 12px 26px rgba(15, 23, 42, 0.04)",
           }}
             onClick={() => handleSelectPlan(i)}>
             <div style={{
               height: 4,
-              background: selectedNarrative === i
+              background: effectiveIndex === i
                 ? `linear-gradient(90deg, ${C.accentPrimary} 0%, ${C.accentSecondary} 100%)`
                 : `${C.border}`,
             }} />
             <div style={{
               padding: 22,
-              background: selectedNarrative === i ? `${C.aiGenerated}` : C.bgElevated || "transparent",
+              background: effectiveIndex === i ? `${C.aiGenerated}` : C.bgElevated || "transparent",
               height: "100%",
               display: "flex",
               flexDirection: "column",
@@ -304,16 +372,16 @@ export const PageStep1 = ({
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
                 <div style={{
                   fontSize: 11,
-                  color: selectedNarrative === i ? C.accentPrimary : C.textSecondary,
+                  color: effectiveIndex === i ? C.accentPrimary : C.textSecondary,
                   fontWeight: 700,
                   padding: "5px 10px",
                   borderRadius: 999,
-                  background: selectedNarrative === i ? `${C.accentPrimary}12` : C.bgPrimary,
-                  border: `1px solid ${selectedNarrative === i ? `${C.accentPrimary}18` : C.border}`,
+                  background: effectiveIndex === i ? `${C.accentPrimary}12` : C.bgPrimary,
+                  border: `1px solid ${effectiveIndex === i ? `${C.accentPrimary}18` : C.border}`,
                 }}>
                   {p.label}
                 </div>
-                {selectedNarrative === i && (
+                {effectiveIndex === i && (
                   <div style={{ fontSize: 11, fontWeight: 700, color: C.accentPrimary }}>
                     已选中
                   </div>

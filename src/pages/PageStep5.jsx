@@ -163,7 +163,8 @@ export const PageStep5 = ({
         title: section.title,
         content: section.text || section.content || '',
         isAI: !section.edited,
-        exhibits: exhibits,
+        exhibits,
+        reviewedDescriptions: (section.exhibits || []).filter(item => item.curatorReviewed),
       };
     }
     const fallbackUnit = resolveRegularUnit(sectionId);
@@ -251,6 +252,13 @@ export const PageStep5 = ({
       fullContent += `## ${section.title}\n\n`;
       fullContent += convertHtmlToMarkdown(section.content);
       fullContent += '\n\n';
+
+      if (section.reviewedDescriptions?.length > 0) {
+        fullContent += '### 展品说明\n\n';
+        section.reviewedDescriptions.forEach(item => {
+          fullContent += `**${escapeHtml(item.name)}** ${escapeHtml(item.desc)}\n\n`;
+        });
+      }
 
       if (section.exhibits && section.exhibits.length > 0) {
         fullContent += '### 展品列表\n\n';
@@ -527,6 +535,15 @@ export const PageStep5 = ({
                 border: `1px solid ${currentSection.isAI ? `${C.accentPrimary}22` : `${C.accentSecondary}33`}`,
               }}
             />
+
+            {currentSection.reviewedDescriptions?.length > 0 && (
+              <section>
+                <h3>展品说明</h3>
+                {currentSection.reviewedDescriptions.map(item => (
+                  <p key={item.entryKey}><strong>{item.name}</strong> {item.desc}</p>
+                ))}
+              </section>
+            )}
 
             {(() => {
               const unitExhibits = resolveUnitExhibits(activeSection);

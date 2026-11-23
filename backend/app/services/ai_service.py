@@ -396,7 +396,8 @@ class AIService:
         additional_intent: str = None,
         narrative_rhythm: Dict[str, Any] = None,
         unit_count: int = 3,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        option_count: int = 3,
     ) -> List[Dict[str, str]]:
         """
         生成叙事方向方案
@@ -440,6 +441,12 @@ class AIService:
             example_json=example_json,
         )
         
+        if option_count != 3:
+            system_prompt = system_prompt.replace("3个", f"{option_count}个")
+            user_prompt = user_prompt.replace("3个", f"{option_count}个")
+            if option_count == 1:
+                user_prompt += "\n只返回一个结果，不提供其他候选。"
+
         result = cls.chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -457,7 +464,7 @@ class AIService:
             
             options = json.loads(content.strip())
             normalized_options = []
-            for index, option in enumerate(options[:3]):
+            for index, option in enumerate(options[:option_count]):
                 option_title = ""
                 option_desc = ""
                 option_logic = ""
@@ -479,12 +486,12 @@ class AIService:
                     {"title": normalized_theme, "desc": "以文明交流为切入点，组织展品之间的互动关系。", "logic": "从展品的时代与地域联系组织文明交流线索。"},
                     {"title": normalized_theme, "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。", "logic": "按材料、工艺与技术传播关系组织内容。"},
                     {"title": normalized_theme, "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。", "logic": "比较不同地域展品的风格差异与审美呼应。"}
-                ]
+                ][:option_count]
             return [
                 {"title": "器物与文明的回声", "desc": "以文明交流为切入点，组织展品之间的互动关系。", "logic": "从展品的时代与地域联系组织文明交流线索。"},
                 {"title": "工艺如何塑造时代", "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。", "logic": "按材料、工艺与技术传播关系组织内容。"},
                 {"title": "风格的迁徙与共鸣", "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。", "logic": "比较不同地域展品的风格差异与审美呼应。"}
-            ]
+            ][:option_count]
     
     @classmethod
     def generate_units(

@@ -793,6 +793,8 @@ export const PageP1 = ({
     }
   };
 
+  const [condition, setCondition] = useState('');
+
   const handleStartGeneration = async () => {
     if (!isLoggedIn || !activeUserId) {
       requireLogin('生成并编辑策展方案');
@@ -803,7 +805,7 @@ export const PageP1 = ({
     setIsGenerating(true);
 
     try {
-      const llmParams = buildLLMParams();
+      const llmParams = { ...buildLLMParams(), experiment_condition: condition || null };
 
       const result = await generateCurationOutline(llmParams);
 
@@ -1370,6 +1372,14 @@ export const PageP1 = ({
             系统会基于展品清单、策展意图、生成参数和叙事节奏，生成叙事方向与后续大纲。
           </div>
         </div>
+        {isLoggedIn && <label>
+          实验配置{' '}
+          <select aria-label="实验配置" value={condition} disabled={isGenerating} onChange={event => setCondition(event.target.value)}>
+            <option value="">普通项目</option>
+            <option value="model">模型组</option>
+            <option value="fixed">对照组</option>
+          </select>
+        </label>}
         <Btn
           disabled={(!uploaded || !uploadedExhibits.length || isGenerating) && isLoggedIn}
           onClick={handleStartGeneration}

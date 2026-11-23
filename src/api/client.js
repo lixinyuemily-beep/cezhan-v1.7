@@ -216,11 +216,13 @@ export const api = {
   },
   
   ai: {
+    compareNarratives: (data) => apiClient.post('/ai/narrative-comparison', data, { timeout: AI_GENERATION_TIMEOUT }),
     generateNarrative: (data) => apiClient.post('/ai/narrative', data),
     generateUnits: (data, options = {}) => generateUnitsWithTask(data, options),
     recommendExhibits: (data) => apiClient.post('/ai/recommend', data),
     recommendExhibitsBatch: (data) => apiClient.post('/ai/recommend-batch', data),
     generateTextSectionsBatch: (data) => apiClient.post('/ai/text-sections-batch', data, { timeout: AI_BATCH_GENERATION_TIMEOUT }),
+    writeExhibitDescriptions: (data) => apiClient.post('/ai/exhibit-descriptions', data, { timeout: AI_GENERATION_TIMEOUT }),
     generateTextSection: (data) => apiClient.post('/ai/text-section', data, { timeout: AI_GENERATION_TIMEOUT }),
     generatePreface: (exhibitionTitle, unitCount, narrative, narrativeRhythm) => 
       apiClient.post('/ai/preface', {}, { timeout: AI_GENERATION_TIMEOUT, params: { exhibition_title: exhibitionTitle, unit_count: unitCount, narrative_title: narrative?.title || '', narrative_desc: narrative?.desc || '', narrative_rhythm: narrativeRhythm ? JSON.stringify(narrativeRhythm) : '' } }),

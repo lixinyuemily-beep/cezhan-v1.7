@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import { ExhibitWriting } from '../components/ExhibitWriting';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
 import { api } from '../api/client';
-import { newInteractionId, recordInteraction } from '../utils/experiment';
+import { experimentCondition, newInteractionId, recordInteraction } from '../utils/experiment';
 import { retryAsync } from '../utils/retry';
 
 const RefreshIcon = () => (
@@ -89,7 +90,7 @@ export const PageStep4 = ({
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.04)",
   };
 
-  const persistSections = async (nextTextSections) => {
+  const persistSections = async (nextTextSections, llmParams) => {
     if (savingRef.current) return false;
     savingRef.current = true;
     setSaving(true);
@@ -98,12 +99,14 @@ export const PageStep4 = ({
       if (currentProject?.id) {
         await api.projects.update(currentProject.id, {
           text_sections: nextTextSections,
+          ...(llmParams ? { llm_params: llmParams } : {}),
         });
       }
       setTextSections(nextTextSections);
-      setCurrentProject?.(project => project ? { ...project, textSections: nextTextSections } : project);
+      const updatedFields = { textSections: nextTextSections, ...(llmParams ? { llmParams } : {}) };
+      setCurrentProject?.(project => project?.id === currentProject?.id ? { ...project, ...updatedFields } : project);
       setProjects?.(items => items.map(project => (
-        project.id === currentProject?.id ? { ...project, textSections: nextTextSections } : project
+        project.id === currentProject?.id ? { ...project, ...updatedFields } : project
       )));
       return true;
     } catch (error) {
@@ -115,6 +118,16 @@ export const PageStep4 = ({
       setSaving(false);
     }
   };
+
+  const condition = experimentCondition(currentProject);
+  const sharedWritingRules = currentProject?.llmParams?.exhibit_writing_rules || {};
+  const saveExhibitWriting = (section, changes, nextSharedRules) => persistSections(
+    textSections.map(item => item === section ? {
+      ...item, ...changes,
+      reviewVersions: changes.exhibits ? [...(item.reviewVersions || []), versionOf(item)] : item.reviewVersions,
+    } : item),
+    nextSharedRules ? { ...currentProject.llmParams, exhibit_writing_rules: nextSharedRules } : undefined,
+  );
 
   const logReview = (type, details) => void recordInteraction(currentProject, 4, type, details);
 
@@ -221,6 +234,8 @@ export const PageStep4 = ({
     return { narrative, narrativeRhythm, regularUnits, exhibitionTitle };
   };
 
+  const exhibitsForKey = (key, unit) => keptExhibits?.[unit?.id ?? unit?.unit_id] || keptExhibits?.[key] || [];
+
   const buildSectionsToGenerate = () => {
     const { regularUnits } = buildGenerationContext();
     const sections = [];
@@ -236,7 +251,7 @@ export const PageStep4 = ({
         title: unit.title,
         kind: 'unit',
         unit,
-        exhibits: keptExhibits?.[key] || [],
+        exhibits: exhibitsForKey(key, unit),
       });
     });
 
@@ -297,7 +312,7 @@ export const PageStep4 = ({
     }
 
     const unit = regularUnits[Number(sectionKey)];
-    const unitExhibits = keptExhibits?.[sectionKey] || [];
+    const unitExhibits = exhibitsForKey(sectionKey, unit);
     const response = await retryAsync(
       () => api.ai.generateTextSection({
         unit,
@@ -415,10 +430,13 @@ export const PageStep4 = ({
       if (!hasText(text) || generated.failed || isFailureText(text)) {
         throw new Error(generated?.error || '没有可用的候选文本');
       }
+      const approved = (section.exhibits || []).filter(item => item.curatorReviewed);
+      const generatedExhibits = generated.exhibits ?? section.exhibits ?? [];
+      const exhibits = [...generatedExhibits.filter(item => !approved.some(kept => kept.name === item.name)), ...approved];
       setPreview({
         section,
         candidateId,
-        replacement: { text, exhibits: generated.exhibits ?? section.exhibits, edited: false, failed: false },
+        replacement: { text, exhibits, edited: false, failed: false },
         restoring: false,
       });
       logReview('generation_result', { candidate_id: candidateId, outcome: 'ready', scope });
@@ -576,7 +594,10 @@ export const PageStep4 = ({
 
       {errorMessage && !preview && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
 
-      {textSections.map((sec) => (
+      {textSections.map((sec) => {
+        const unit = (units || []).filter(item => item.tag !== '序章' && item.tag !== '尾声')[Number(sec.key)];
+        const sectionExhibits = exhibitsForKey(sec.key, unit);
+        return (
         <div key={sec.key} style={{
           marginBottom: 24,
           borderRadius: 22,
@@ -649,9 +670,14 @@ export const PageStep4 = ({
             />
           )}
 
+          {condition && sectionExhibits.length > 0 && editing === null && (
+            <ExhibitWriting key={`${currentProject?.id}-${sec.key}-${condition}`} section={sec}
+              exhibits={sectionExhibits} condition={condition} sharedRules={sharedWritingRules}
+              save={saveExhibitWriting} log={logReview} C={C} />
+          )}
+
           {sec.key !== 'preface' && sec.key !== 'epilogue' && (() => {
-            const unitId = sec.key;
-            const exhibitsForSection = keptExhibits?.[unitId] || [];
+            const exhibitsForSection = sectionExhibits;
             const hasExhibits = exhibitsForSection.length > 0;
             return hasExhibits && (
               <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 14, background: C.bgPrimary, border: `1px solid ${C.border}` }}>
@@ -666,7 +692,7 @@ export const PageStep4 = ({
             );
           })()}
         </div>
-      ))}
+      ); })}
 
       <div style={{
         marginTop: 8,

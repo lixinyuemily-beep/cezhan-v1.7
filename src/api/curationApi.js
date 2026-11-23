@@ -29,12 +29,13 @@ export async function generateCurationOutline(params) {
       narrative_rhythm: params.narrative_rhythm || null,
       unit_count: params.advanced_settings?.unitCount || 3,
       temperature: params.advanced_settings?.temperature || 0.9,
+      option_count: params.experiment_condition === 'fixed' ? 1 : 3,
     });
 
     const options = (result.options || []).map((opt, i) => ({
       label: `方案 ${String.fromCharCode(65 + i)}`,
       title: opt.title || "",
-      logic: opt.desc || "",
+      logic: opt.logic || opt.desc || "",
     }));
 
     return {

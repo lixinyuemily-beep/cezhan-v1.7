@@ -226,6 +226,7 @@ class NarrativeRequest(BaseModel):
     narrative_rhythm: Optional[Dict[str, Any]] = Field(None, description="叙事节奏配置")
     unit_count: Optional[int] = Field(3, description="单元数量")
     temperature: Optional[float] = Field(0.9, description="AI温度参数，控制生成随机性")
+    option_count: int = Field(3, ge=1, le=3)
 
 
 class NarrativeResponse(BaseModel):
