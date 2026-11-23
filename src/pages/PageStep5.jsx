@@ -1,3 +1,4 @@
+import { ExhibitJudgments } from '../components/ExhibitJudgments';
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
 import {
@@ -540,7 +541,10 @@ export const PageStep5 = ({
               <section>
                 <h3>展品说明</h3>
                 {currentSection.reviewedDescriptions.map(item => (
-                  <p key={item.entryKey}><strong>{item.name}</strong> {item.desc}</p>
+                  <div key={item.entryKey} style={{ marginBottom: 12 }}>
+                    <div><strong>{item.name}</strong> {item.desc}</div>
+                    <ExhibitJudgments judgments={item.judgments} />
+                  </div>
                 ))}
               </section>
             )}

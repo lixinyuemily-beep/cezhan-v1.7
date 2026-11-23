@@ -178,6 +178,60 @@ class ExhibitWritingRequest(BaseModel):
     edited: str = Field(default="", max_length=10000)
 
 
+def _normalize_exhibit_statement(statement, sources):
+    if not isinstance(statement, dict) or not isinstance(statement.get("text"), str):
+        raise ValueError("invalid exhibit statement")
+    text = statement["text"].strip()
+    if not text:
+        raise ValueError("empty exhibit statement")
+    references = []
+    candidates = statement.get("references")
+    for candidate in candidates if isinstance(candidates, list) else []:
+        if not isinstance(candidate, dict):
+            continue
+        source_id, field = candidate.get("source_id"), candidate.get("field")
+        if not isinstance(source_id, str) or not isinstance(field, str):
+            continue
+        source = sources.get(source_id)
+        if not source:
+            continue
+        value = source["fields"].get(field)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        reference = {
+            "sourceId": source_id, "field": field, "label": source["label"],
+            "locator": source["locator"], "value": value,
+        }
+        if reference not in references:
+            references.append(reference)
+    kind = "interpretation" if statement.get("kind") == "interpretation" else "fact"
+    return {"text": text, "kind": kind, "references": references}
+
+
+def _build_exhibit_description(entry, exhibit):
+    source_records = exhibit.get("source_records")
+    if not isinstance(source_records, list):
+        source_records = []
+    sources = {
+        str(source["id"]): source for source in source_records
+        if isinstance(source, dict) and source.get("id")
+        and isinstance(source.get("label"), str) and source["label"].strip()
+        and isinstance(source.get("locator"), str) and source["locator"].strip()
+        and isinstance(source.get("fields"), dict)
+    }
+    statements = entry.get("statements")
+    if isinstance(statements, list) and statements:
+        judgments = [_normalize_exhibit_statement(statement, sources) for statement in statements]
+    else:
+        # Older model output is still readable, with no reference treated as verified.
+        judgments = [_normalize_exhibit_statement({"text": entry.get("text")}, sources)]
+    return {
+        "key": str(exhibit["entryKey"]),
+        "text": "".join(judgment["text"] for judgment in judgments),
+        "judgments": judgments,
+    }
+
+
 @router.post("/exhibit-descriptions")
 async def write_exhibit_descriptions(request: ExhibitWritingRequest):
     if request.action == "infer_rule":
@@ -188,7 +242,11 @@ async def write_exhibit_descriptions(request: ExhibitWritingRequest):
             raise HTTPException(status_code=422, detail="请选择有资料的展品")
         prompt = (
             "依据提供的馆藏资料写展品说明，每件一条，不得补造事实。"
-            '按用户确认的写法写作。只返回 JSON 数组，每项为 {"key":"对应 entryKey","text":"说明正文"}。'
+            "按用户确认的写法写作。将正文拆为有序、完整带标点的句子，每句单独标出类型及依据。"
+            "fact 是可核对的事实，interpretation 是需策展人判断的阐释或推断。"
+            "依据只填这件展品提供的 source_records 中真实存在的 id 和 fields 键。无法对应就用空数组。"
+            '只返回 JSON 数组，每项为 {"key":"对应 entryKey","statements":[{"text":"一句正文。",'
+            '"kind":"fact","references":[{"source_id":"资料 id","field":"字段键"}]}]}。'
         )
         context = {"exhibits": request.exhibits, "instruction": request.instruction}
     result = await run_ai_call(
@@ -203,13 +261,13 @@ async def write_exhibit_descriptions(request: ExhibitWritingRequest):
         return content
     try:
         entries = json.loads(ai_service._strip_json_fence(content))
-        keys = [str(item["entryKey"]) for item in request.exhibits]
-        if not isinstance(entries, list) or len(entries) != len(keys):
+        exhibits = {str(item["entryKey"]): item for item in request.exhibits}
+        if not isinstance(entries, list) or len(entries) != len(exhibits) or len(exhibits) != len(request.exhibits):
             raise ValueError("unexpected entry count")
-        by_key = {str(item["key"]): str(item["text"]).strip() for item in entries}
-        if set(by_key) != set(keys) or not all(by_key.values()):
+        by_key = {str(item["key"]): item for item in entries}
+        if set(by_key) != set(exhibits):
             raise ValueError("unexpected entry keys")
-        return [{"key": key, "text": by_key[key]} for key in keys]
+        return [_build_exhibit_description(by_key[key], exhibit) for key, exhibit in exhibits.items()]
     except (ValueError, KeyError, TypeError):
         raise HTTPException(status_code=502, detail="展品说明结果与请求的展品不匹配")
 

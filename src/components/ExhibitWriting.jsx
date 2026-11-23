@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import { getExhibitName } from '../utils/exhibitFields';
 import { assessExhibitEvidence } from '../utils/exhibitEvidence';
+import { ExhibitJudgments } from './ExhibitJudgments';
 import { Btn } from './ui';
 
 export function ExhibitWriting({ section, exhibits, condition, sharedRules, save, log, C }) {
@@ -127,7 +128,10 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     setBusy(true);
     try {
       const confirmed = { text, scope: ruleScope, source: 'confirmed_sample' };
-      const changes = { exhibitWritingSample: { key: sample.key, text: sample.text } };
+      const changes = { exhibitWritingSample: {
+        key: sample.key, text: sample.text,
+        judgments: sample.text === sample.original ? sample.judgments : undefined,
+      } };
       if (ruleScope === 'unit') changes.exhibitWritingRule = confirmed;
       const nextSharedRules = ruleScope === 'unit' ? undefined : { ...sharedRules, [ruleScope]: confirmed };
       if (!await save(section, changes, nextSharedRules)) return;
@@ -147,7 +151,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       ...(section.exhibits || []).filter(entry => !items.some(item => matchesRecord(entry, item.key))),
       ...items.map(item => ({
         entryKey: item.key, name: records.find(record => record.entryKey === item.key)?.name,
-        desc: item.text, curatorReviewed: reviewed, reviewStatus: reviewed ? 'confirmed' : 'pending',
+        desc: item.text, judgments: item.judgments, curatorReviewed: reviewed, reviewStatus: reviewed ? 'confirmed' : 'pending',
         sourceRecords: evidence.get(item.key).sources.map(({ id, label, locator }) => ({ id, label, locator })),
       })),
     ],
@@ -215,6 +219,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       {(section.exhibits || []).filter(item => item.curatorReviewed || item.reviewStatus === 'pending').map(item => (
         <div key={item.entryKey}>
           <strong>{item.name}</strong>　{item.desc}
+          <ExhibitJudgments judgments={item.judgments} />
           {item.reviewStatus === 'pending' && <>
             {' '}<span>待审阅</span>{' '}
             <Btn small disabled={busy} onClick={() => confirmDescription(item)}>确认{item.name}说明</Btn>
@@ -233,6 +238,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
           <textarea style={{ display: 'block', width: '100%' }} rows={4} value={sample.text} disabled={busy}
             onChange={event => { setSample({ ...sample, text: event.target.value }); setConfirmingRule(false); }} />
         </label>
+        <ExhibitJudgments judgments={sample.text === sample.original ? sample.judgments : undefined} />
         <Btn small disabled={busy || !sample.text.trim()} onClick={infer}>归纳写法</Btn>
       </>}
       {confirmingRule && <>
@@ -252,15 +258,16 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         {candidates.map(item => {
           const record = records.find(entry => entry.entryKey === item.key);
           const before = (section.exhibits || []).find(entry => entry.name === record.name)?.desc;
-          return <label key={item.key} style={{ display: 'grid', gap: 4 }}>
-            <span><input type="checkbox" checked={selected.includes(item.key)} disabled={busy}
-              onChange={event => setSelected(event.target.checked ? [...selected, item.key] : selected.filter(key => key !== item.key))} /> {record.name}</span>
+          return <div key={item.key} style={{ display: 'grid', gap: 4 }}>
+            <label><input type="checkbox" checked={selected.includes(item.key)} disabled={busy}
+              onChange={event => setSelected(event.target.checked ? [...selected, item.key] : selected.filter(key => key !== item.key))} /> {record.name}</label>
             {before && <span>原文 {before}</span>}
             <span>候选 {item.text}</span>
+            <ExhibitJudgments judgments={item.judgments} />
             {evidence.get(item.key).state === 'unlocated'
               ? <span>导入资料尚无可定位出处，待核实</span>
               : <span>本次提供的资料：{evidence.get(item.key).sources.map(source => `${source.label} · ${source.locator}`).join('；')}</span>}
-          </label>;
+          </div>;
         })}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn small disabled={busy || !selected.length} onClick={apply}>应用所选条目</Btn>
