@@ -7,11 +7,11 @@ const fieldLabels = {
   description: '介绍',
 };
 
-export function assessExhibitEvidence(exhibit) {
+export function assessExhibitEvidence(exhibit, choices = {}) {
   const sources = (Array.isArray(exhibit.source_records) ? exhibit.source_records : []).filter(source =>
     source?.id && source?.label && source?.locator && source?.fields && typeof source.fields === 'object'
   );
-  const conflicts = Object.entries(fieldLabels).flatMap(([key, label]) => {
+  const detected = Object.entries(fieldLabels).flatMap(([key, label]) => {
     // Free-form descriptions may be complementary. Compare only explicitly structured facts.
     if (key === 'description') return [];
     const entries = sources.flatMap(source => normalizeExhibitKeyText(source.fields[key]) ? [{
@@ -21,13 +21,25 @@ export function assessExhibitEvidence(exhibit) {
     return values.size > 1 ? [{ key, label, entries }] : [];
   });
 
+  const conflicts = detected.filter(conflict =>
+    !conflict.entries.some(entry => entry.sourceId === choices[conflict.key])
+  );
+  const acceptedSources = sources.map(source => ({
+    ...source,
+    fields: Object.fromEntries(Object.entries(source.fields).filter(([key]) =>
+      !detected.some(conflict => conflict.key === key
+        && conflict.entries.some(entry => entry.sourceId === choices[key])
+        && choices[key] !== source.id)
+    )),
+  }));
   const description = sources.map(source => source.fields.description)
     .find(value => normalizeExhibitKeyText(value));
   const importedDescription = getExhibitIntroduction(exhibit) || exhibit.intro || exhibit.desc;
   const hasDescription = Boolean(normalizeExhibitKeyText(sources.length ? description : importedDescription));
   return {
     state: conflicts.length ? 'conflict' : hasDescription ? (sources.length ? 'available' : 'unlocated') : 'missing',
-    sources,
+    sources: acceptedSources,
     conflicts,
+    detected,
   };
 }

@@ -1,3 +1,4 @@
+import { exhibitImpact, removeObsoleteDescriptions } from '../utils/exhibitImpact';
 import { useState, useRef, useEffect } from 'react';
 import { ExhibitWriting } from '../components/ExhibitWriting';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
@@ -132,8 +133,8 @@ export const PageStep4 = ({
 
   const logReview = (type, details) => void recordInteraction(currentProject, 4, type, details);
 
-  const versionOf = ({ text, exhibits, edited, failed }) => ({
-    text, exhibits, edited, failed, savedAt: new Date().toISOString(),
+  const versionOf = ({ text, exhibits, edited, failed, exhibitContext }) => ({
+    text, exhibits, edited, failed, exhibitContext, savedAt: new Date().toISOString(),
   });
 
   const replaceSection = (section, replacement) => ({
@@ -483,9 +484,37 @@ export const PageStep4 = ({
     }
   };
 
+  const impactFor = (section) => {
+    if (section.key === 'preface' || section.key === 'epilogue') return { added: [], removed: [], next: [] };
+    const regularUnits = (units || []).filter(unit => unit.tag !== '序章' && unit.tag !== '尾声');
+    return exhibitImpact(section, exhibitsForKey(section.key, regularUnits[Number(section.key)]));
+  };
+
+  const hasImpact = section => {
+    const { added, removed } = impactFor(section);
+    return added.length > 0 || removed.length > 0;
+  };
+
+  const resolveImpact = async (section, removeDescriptions) => {
+    const { added, removed, next } = impactFor(section);
+    const saved = await persistSections(textSections.map(item => {
+      if (item !== section) return item;
+      const changes = { exhibitContext: next, reviewStatus: 'pending' };
+      if (!removeDescriptions) return { ...item, ...changes };
+      return replaceSection(item, {
+        ...changes,
+        exhibits: removeObsoleteDescriptions(item.exhibits, removed, next),
+      });
+    }));
+    if (saved) logReview('impact_review', {
+      scope: { section_key: section.key }, outcome: removeDescriptions ? 'remove_obsolete_descriptions' : 'reviewed',
+      added_keys: added.map(item => item.key), removed_keys: removed.map(item => item.key),
+    });
+  };
+
   const confirmSection = async (key) => {
     const saved = await persistSections(textSections.map(section => (
-      section.key === key ? { ...section, reviewStatus: 'confirmed' } : section
+      section.key === key ? { ...section, reviewStatus: 'confirmed', exhibitContext: impactFor(section).next } : section
     )));
     if (saved) {
       const section = textSections.find(item => item.key === key);
@@ -610,6 +639,8 @@ export const PageStep4 = ({
       {textSections.map((sec) => {
         const unit = (units || []).filter(item => item.tag !== '序章' && item.tag !== '尾声')[Number(sec.key)];
         const sectionExhibits = exhibitsForKey(sec.key, unit);
+        const impact = impactFor(sec);
+        const affected = impact.added.length > 0 || impact.removed.length > 0;
         return (
         <div key={sec.key} style={{
           marginBottom: 24,
@@ -625,7 +656,7 @@ export const PageStep4 = ({
                 {sec.title}
               </h2>
               {sec.edited && <Tag label="[已修改]" color={C.humanEdited} textColor={C.accentSecondary} />}
-              {needsReview(sec) && <Tag label="待审阅" color={C.aiGenerated} textColor={C.accentPrimary} />}
+              {(needsReview(sec) || affected) && <Tag label="待审阅" color={C.aiGenerated} textColor={C.accentPrimary} />}
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {sec.reviewVersions?.length > 0 && (
@@ -634,7 +665,7 @@ export const PageStep4 = ({
               <Btn small variant="ghost" disabled={saving || editing !== null} onClick={() => handleRegenerate(sec)}>
                 <RefreshIcon /> 重新生成
               </Btn>
-              {sec.reviewStatus !== 'confirmed' && !needsRepair(sec) && (
+              {sec.reviewStatus !== 'confirmed' && !needsRepair(sec) && !affected && (
                 <Btn small disabled={saving || editing !== null} onClick={() => confirmSection(sec.key)}>确认本段</Btn>
               )}
             </div>
@@ -683,6 +714,21 @@ export const PageStep4 = ({
             />
           )}
 
+          {affected && (
+            <section aria-label="展品变更影响" style={{ ...infoCardStyle, marginTop: 12 }}>
+              <strong>展品变更影响</strong>
+              {impact.added.length > 0 && <p>新增展品 {impact.added.map(item => item.name || item.key).join('、')}</p>}
+              {impact.removed.length > 0 && <p>撤下展品 {impact.removed.map(item => item.name || item.key).join('、')}</p>}
+              <p>请复核本单元正文和展品说明是否仍与展品配置一致。</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Btn small variant="ghost" disabled={saving || editing !== null}
+                  onClick={() => resolveImpact(sec, false)}>保留现有文字</Btn>
+                {impact.removed.length > 0 && <Btn small disabled={saving || editing !== null}
+                  onClick={() => resolveImpact(sec, true)}>撤下对应展品说明</Btn>}
+              </div>
+            </section>
+          )}
+
           {condition && sectionExhibits.length > 0 && editing === null && (
             <ExhibitWriting key={`${currentProject?.id}-${sec.key}-${condition}`} section={sec}
               exhibits={sectionExhibits} condition={condition} sharedRules={sharedWritingRules}
@@ -725,12 +771,12 @@ export const PageStep4 = ({
             确认文本后进入完整大纲
           </div>
           <div style={{ marginTop: 4, fontSize: 12, color: C.warning }}>
-            {textSections.some(needsReview) ? '请先处理生成失败的段落，并确认待审阅的文字。' : '请核对各段文字的表述、结构与学术准确性。'}
+            {textSections.some(section => needsReview(section) || hasImpact(section)) ? '请先处理生成失败的段落，并确认待审阅的文字。' : '请核对各段文字的表述、结构与学术准确性。'}
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <Btn variant="ghost" disabled={saving || editing !== null} onClick={goPrevStep}>← 返回 Step3</Btn>
-          <Btn disabled={saving || editing !== null || textSections.some(needsReview)} onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
+          <Btn disabled={saving || editing !== null || textSections.some(section => needsReview(section) || hasImpact(section))} onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
         </div>
       </div>
 

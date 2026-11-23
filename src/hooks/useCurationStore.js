@@ -1,3 +1,4 @@
+import { snapshotExhibits } from '../utils/exhibitImpact';
 import { useState, useCallback, useEffect } from 'react';
 import { api } from '../api/client';
 import { generateDefaultTextSections } from '../data/textTemplates';
@@ -469,6 +470,8 @@ export function useCurationStore() {
               title: protectedSection ? section.title : draft.title,
               unitId: section.unit?.id,
               reviewStatus: protectedSection?.reviewStatus || 'pending',
+              exhibitContext: protectedSection?.exhibitContext
+                ?? snapshotExhibits(section.exhibits || []),
             };
           });
 

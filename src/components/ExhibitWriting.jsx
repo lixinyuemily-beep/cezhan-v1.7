@@ -21,7 +21,11 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
   const records = exhibits.map((exhibit, index) => ({ ...exhibit, name: getExhibitName(exhibit), entryKey: String(exhibit.id || exhibit.编号 || `index-${index}`) }));
   const mode = fixed || rule ? 'guided_generation' : 'interactive_editing';
   const scope = { section_key: section.key, content_type: 'exhibit_description' };
-  const evidence = new Map(records.map(record => [record.entryKey, assessExhibitEvidence(record)]));
+  const sourceChoices = section.exhibitSourceChoices || {};
+  const evidence = new Map(records.map(record => [
+    record.entryKey, assessExhibitEvidence(record, fixed ? {} : sourceChoices[record.entryKey]),
+  ]));
+  const observedConflicts = records.filter(record => evidence.get(record.entryKey).detected.length > 0);
   const conflicting = records.filter(record => evidence.get(record.entryKey).state === 'conflict');
   const available = records.filter(record => {
     const state = evidence.get(record.entryKey).state;
@@ -37,6 +41,23 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
   const changeJudgment = (entryKey, hold) => {
     setHeldKeys(keys => hold ? [...keys, entryKey] : keys.filter(key => key !== entryKey));
     log('clarification', { scope, kind: 'judgment_override', entry_key: entryKey, state: hold ? 'needs_review' : 'available' });
+  };
+
+  const chooseSource = async (entryKey, field, sourceId) => {
+    setBusy(true);
+    try {
+      const saved = await save(section, {
+        exhibitSourceChoices: {
+          ...sourceChoices, [entryKey]: { ...sourceChoices[entryKey], [field]: sourceId || null },
+        },
+      });
+      if (saved) log('clarification', {
+        scope, kind: 'source_selection', timing: 'handoff', entry_key: entryKey,
+        field, source_id: sourceId || null,
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const run = async (action, operation) => {
@@ -173,13 +194,20 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         {rule && <span>当前生效写法（{scopeLabels[rule.scope] || '本单元'}）：{rule.text}</span>}
       </>}
       <span>本次由人工智能起草，策展人审阅确认。</span>
-      {conflicting.length > 0 && <section aria-label="资料冲突">
-        <strong>资料冲突，保留待核对</strong>
-        {conflicting.map(record => <div key={record.entryKey}>
+      {observedConflicts.length > 0 && <section aria-label="资料冲突">
+        <strong>资料冲突 · {conflicting.length} 件待核对</strong>
+        {observedConflicts.map(record => <div key={record.entryKey}>
           <strong>{record.name}</strong>
-          {evidence.get(record.entryKey).conflicts.map(conflict => <div key={conflict.key}>
+          {evidence.get(record.entryKey).detected.map(conflict => <div key={conflict.key}>
             {conflict.label}记载不一致
             <ul>{conflict.entries.map(entry => <li key={entry.sourceId}>{entry.value}（{entry.label} · {entry.locator}）</li>)}</ul>
+            {!fixed && <label>采用的{conflict.label}来源{' '}
+              <select value={sourceChoices[record.entryKey]?.[conflict.key] || ''}
+                disabled={busy || candidates.length > 0} onChange={event => chooseSource(record.entryKey, conflict.key, event.target.value)}>
+                <option value="">暂缓该条目</option>
+                {conflict.entries.map(entry => <option key={entry.sourceId} value={entry.sourceId}>{entry.label} · {entry.locator}</option>)}
+              </select>
+            </label>}
           </div>)}
         </div>)}
       </section>}
