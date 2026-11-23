@@ -308,6 +308,10 @@ export function useCurationStore() {
           }
         } catch (error) {
           console.error('保存步骤失败:', error);
+          if (currentStep === 4) {
+            showToast('保存审核进度失败，请重试。', 'error');
+            return;
+          }
         }
       }
       
@@ -364,13 +368,24 @@ export function useCurationStore() {
             sectionsToGenerate.push({ key: 'epilogue', title: '展览尾声', kind: 'epilogue' });
           }
 
+          const protectedSections = new Map(
+            sectionsToGenerate.flatMap(section => {
+              const existing = textSections.find(item => {
+                if (!(item.edited || item.reviewStatus || item.reviewVersions?.length)) return false;
+                if (item.unitId != null) return item.unitId === section.unit?.id;
+                return String(item.key) === section.key && item.title === section.title;
+              });
+              return existing ? [[section.key, existing]] : [];
+            })
+          );
+          const sectionsToDraft = sectionsToGenerate.filter(section => !protectedSections.has(section.key));
           let textSectionsData = [];
 
-          try {
+          if (sectionsToDraft.length > 0) try {
             const response = await retryAsync(
               () => api.ai.generateTextSectionsBatch({
                 exhibition_title: exhibitionTitle,
-                sections: sectionsToGenerate,
+                sections: sectionsToDraft,
                 kept_exhibits: convertedKeptExhibits,
                 narrative,
                 narrative_rhythm: activeNarrativeRhythm,
@@ -381,12 +396,12 @@ export function useCurationStore() {
                 delayMs: 1800,
                 shouldRetryResult: (result) => {
                   const sections = result?.sections || [];
-                  return sections.length !== sectionsToGenerate.length || sections.some(section => !String(section?.text || '').trim() || isFailureText(section?.text));
+                  return sections.length !== sectionsToDraft.length || sections.some(section => !String(section?.text || '').trim() || isFailureText(section?.text));
                 },
               }
             );
             const byKey = Object.fromEntries((response.sections || []).map(section => [String(section.key), section]));
-            textSectionsData = sectionsToGenerate.map(section => ({
+            textSectionsData = sectionsToDraft.map(section => ({
               key: section.key,
               title: byKey[section.key]?.title || section.title,
               text: byKey[section.key]?.text || '<p>正在继续生成文本，请稍候…</p>',
@@ -399,7 +414,7 @@ export function useCurationStore() {
             console.error('整套策展文本生成失败，改用单段兜底:', batchError);
             textSectionsData = [];
 
-            for (const section of sectionsToGenerate) {
+            for (const section of sectionsToDraft) {
               try {
                 if (section.kind === 'preface') {
                   const response = await retryAsync(
@@ -436,12 +451,26 @@ export function useCurationStore() {
                   textSectionsData.push({ key: section.key, title: section.title, text: content, exhibits: exhibitSummaries, failed: false, autoRepairing: false, edited: false });
                 }
               } catch (e) {
-                console.error(`生成 "${section.title}" 文本失败，将进入自动修复:`, e);
+                console.error(`生成 "${section.title}" 文本失败，可在审核页重新生成:`, e);
                 textSectionsData.push(buildPendingSection(section.key, section.title, section.exhibits || []));
               }
             }
           }
           
+          const draftsByKey = new Map(textSectionsData.map(section => [section.key, section]));
+          textSectionsData = sectionsToGenerate.map(section => {
+            const protectedSection = protectedSections.get(section.key);
+            const draft = draftsByKey.get(section.key);
+            return {
+              ...draft,
+              ...protectedSection,
+              key: section.key,
+              title: protectedSection ? section.title : draft.title,
+              unitId: section.unit?.id,
+              reviewStatus: protectedSection?.reviewStatus || 'pending',
+            };
+          });
+
           if (textSectionsData.length > 0) {
             setTextSections(textSectionsData);
             
@@ -704,6 +733,7 @@ export function useCurationStore() {
     }
     
     setCurrentProject(projectData);
+    setTextSections(projectData.textSections);
     setCurrentStep(project.step);
     setCurrentPage(`step${project.step}`);
     setShowAdvanced(true);
