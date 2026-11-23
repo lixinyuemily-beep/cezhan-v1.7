@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
 import { api } from '../api/client';
+import { newInteractionId, recordInteraction } from '../utils/experiment';
 import { retryAsync } from '../utils/retry';
 
 const RefreshIcon = () => (
@@ -114,6 +115,8 @@ export const PageStep4 = ({
       setSaving(false);
     }
   };
+
+  const logReview = (type, details) => void recordInteraction(currentProject, 4, type, details);
 
   const versionOf = ({ text, exhibits, edited, failed }) => ({
     text, exhibits, edited, failed, savedAt: new Date().toISOString(),
@@ -379,6 +382,7 @@ export const PageStep4 = ({
         section.key === sectionKey ? replaceSection(section, { text: nextText, edited: true, failed: !hasText(nextText) }) : section
       );
       if (!await persistSections(nextTextSections)) return;
+      logReview('revision', { method: 'manual', scope: { section_key: sectionKey }, candidate_id: currentSection.appliedCandidateId });
     }
     setEditing(null);
     savedSelectionRef.current = null;
@@ -400,6 +404,9 @@ export const PageStep4 = ({
     setRegenerateModal(null);
     setErrorMessage('');
     setRegeneratingKey(section.key);
+    const candidateId = newInteractionId();
+    const scope = { section_key: section.key, generation_range: fullDraft ? 'outline' : 'section' };
+    logReview('request_start', { task: 'interpretive_text', method: 'regeneration', scope, candidate_id: candidateId });
     try {
       const generated = fullDraft
         ? (await generateFullDraftSections()).find(item => String(item.key) === String(section.key))
@@ -410,10 +417,13 @@ export const PageStep4 = ({
       }
       setPreview({
         section,
+        candidateId,
         replacement: { text, exhibits: generated.exhibits ?? section.exhibits, edited: false, failed: false },
         restoring: false,
       });
+      logReview('generation_result', { candidate_id: candidateId, outcome: 'ready', scope });
     } catch (error) {
+      logReview('generation_result', { candidate_id: candidateId, outcome: 'failed', scope });
       console.error('生成候选文本失败:', error);
       setErrorMessage('候选生成失败。原文已保留，你可以重新尝试或直接编辑。');
     } finally {
@@ -429,15 +439,40 @@ export const PageStep4 = ({
       return;
     }
     const saved = await persistSections(textSections.map(section => (
-      section === current ? replaceSection(section, preview.replacement) : section
+      section === current ? replaceSection(section, { ...preview.replacement, appliedCandidateId: preview.candidateId }) : section
     )));
-    if (saved) setPreview(null);
+    if (saved) {
+      logReview(preview.restoring ? 'revision' : 'candidate_disposition', {
+        method: preview.restoring ? 'restore' : 'regeneration',
+        outcome: preview.restoring ? 'restored' : 'accepted',
+        scope: { section_key: current.key },
+        candidate_id: preview.candidateId,
+      });
+      setPreview(null);
+    }
   };
 
   const confirmSection = async (key) => {
-    await persistSections(textSections.map(section => (
+    const saved = await persistSections(textSections.map(section => (
       section.key === key ? { ...section, reviewStatus: 'confirmed' } : section
     )));
+    if (saved) {
+      const section = textSections.find(item => item.key === key);
+      logReview('review', {
+        outcome: section?.appliedCandidateId && section.edited ? 'accepted_after_edit' : 'confirmed',
+        scope: { section_key: key }, candidate_id: section?.appliedCandidateId,
+      });
+    }
+  };
+
+  const dismissPreview = () => {
+    if (savingRef.current) return;
+    if (preview.candidateId) {
+      logReview('candidate_disposition', {
+        candidate_id: preview.candidateId, outcome: 'discarded', scope: { section_key: preview.section.key },
+      });
+    }
+    setPreview(null);
   };
 
   return (
@@ -665,7 +700,7 @@ export const PageStep4 = ({
           <div style={{ padding: 20 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: C.textPrimary }}>重新生成确认</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20, lineHeight: 1.6 }}>
-              请选择「{regenerateModal.title}」的重新生成方式。生成后可对照原文和候选，再决定是否应用。
+              请选择「{regenerateModal.title}」的重新生成方式。本次由人工智能起草，策展人审阅确认。生成后可对照原文和候选，再决定是否应用。
             </p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <Btn variant="ghost" onClick={() => setRegenerateModal(null)}>取消</Btn>
@@ -694,9 +729,9 @@ export const PageStep4 = ({
 
       {preview && (
         <Modal C={C} width={900} title={preview.restoring ? '对照历史版本' : '对照生成候选'}
-          onClose={() => { if (!savingRef.current) setPreview(null); }}
+          onClose={dismissPreview}
           footer={<>
-            <Btn variant="ghost" disabled={saving} onClick={() => setPreview(null)}>保留原文</Btn>
+            <Btn variant="ghost" disabled={saving} onClick={dismissPreview}>保留原文</Btn>
             <Btn disabled={saving} onClick={applyPreview}>{preview.restoring ? '恢复此版本' : '应用候选'}</Btn>
           </>}
         >

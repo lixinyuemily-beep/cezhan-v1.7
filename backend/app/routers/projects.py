@@ -1,7 +1,10 @@
 """
 项目 API 路由
 """
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+from uuid import UUID
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Header, HTTPException, Query
 from ..models.schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse,
@@ -101,6 +104,37 @@ async def delete_project(project_id: str, authorization: Optional[str] = Header(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class InteractionEvent(BaseModel):
+    event_id: UUID
+    condition: Literal["model", "fixed"]
+    event_type: Literal[
+        "stage_start", "stage_end", "request_start", "generation_result",
+        "candidate_disposition", "revision", "review", "condition_change",
+        "mode_change", "clarification", "notice", "impact_review"
+    ]
+    stage: int = Field(ge=1, le=5)
+    occurred_at: datetime
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/{project_id}/interaction-events")
+def add_interaction_event(project_id: UUID, event: InteractionEvent, authorization: Optional[str] = Header(None)):
+    user_id = _require_authenticated_user_id(authorization)
+    if not projects_db.get_project(str(project_id), user_id):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    projects_db.add_interaction_event(str(project_id), user_id, event.model_dump(mode="json"))
+    return {"saved": True}
+
+
+@router.get("/{project_id}/interaction-events", response_model=List[dict])
+def get_interaction_events(project_id: UUID, authorization: Optional[str] = Header(None)):
+    user_id = _require_authenticated_user_id(authorization)
+    if not (projects_db.get_project(str(project_id), user_id)
+            or projects_db.get_completed_project(str(project_id), user_id)):
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return projects_db.get_interaction_events(str(project_id), user_id)
 
 
 # ==================== 完成项目操作 ====================

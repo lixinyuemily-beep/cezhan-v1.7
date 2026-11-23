@@ -169,6 +169,7 @@ export const api = {
     create: (data) => apiClient.post('/projects', data),
     update: (projectId, data) => apiClient.put(`/projects/${projectId}`, data),
     delete: (projectId) => apiClient.delete(`/projects/${projectId}`),
+    addInteractionEvent: (projectId, event) => apiClient.post(`/projects/${projectId}/interaction-events`, event),
     versions: (projectId) => apiClient.get(`/projects/${projectId}/versions`),
     getUnits: (projectId) => apiClient.get(`/projects/${projectId}/units`),
     createUnit: (data) => apiClient.post('/projects/units', data),

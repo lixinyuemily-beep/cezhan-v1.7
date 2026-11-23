@@ -149,6 +149,29 @@ class ProjectsDatabaseService(DatabaseClientProvider):
         return updated_project
 
     @classmethod
+    def add_interaction_event(cls, project_id: str, user_id: str, event: Dict) -> None:
+        cls.get_client().table("project_interaction_events").upsert(
+            {**event, "project_id": project_id, "user_id": user_id},
+            on_conflict="project_id,event_id", ignore_duplicates=True,
+        ).execute()
+
+    @classmethod
+    def get_interaction_events(cls, project_id: str, user_id: str) -> List[Dict]:
+        page_size = 500
+        events = []
+        while True:
+            page = (
+                cls.get_client().table("project_interaction_events").select(
+                    "event_id,condition,event_type,stage,occurred_at,details"
+                ).eq("project_id", project_id).eq("user_id", user_id)
+                .order("occurred_at").order("event_id")
+                .range(len(events), len(events) + page_size - 1).execute()
+            ).data or []
+            events.extend(page)
+            if len(page) < page_size:
+                return events
+
+    @classmethod
     def delete_project(cls, project_id: str, user_id: Optional[str] = None) -> bool:
         client = cls.get_client()
         query = client.table(settings.table_projects).delete().eq("id", project_id)

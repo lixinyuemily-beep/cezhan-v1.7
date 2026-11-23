@@ -276,6 +276,7 @@ export function useCurationStore() {
             updateData.exhibition_title = exhibitTitle;
             updateData.uploaded_exhibits = uploadedExhibits;
             updateData.llm_params = {
+              ...currentProject.llmParams,
               exhibition_title: exhibitTitle,
               additional_intent: additionalIntent,
               narrative_rhythm: narrativeRhythm,

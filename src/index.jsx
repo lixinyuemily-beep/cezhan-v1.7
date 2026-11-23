@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useCurationStore } from "./hooks";
 import { api, getReadableApiError } from "./api/client";
@@ -7,6 +7,7 @@ import { ToastProvider } from "./components/ui/Toast";
 import { PageP0, PageP1, PageExhibits, PageSettings, PageHelp, PageStep1, PageStep2, PageStep3, PageStep4, PageStep5 } from "./pages";
 import { getTheme, FONT_UI, FONT_SERIF } from "./constants/theme";
 import { ThemeProvider } from "./hooks/useTheme";
+import { experimentCondition, newInteractionId, recordInteraction } from './utils/experiment';
 import { retryAsync } from "./utils/retry";
 
 const PAGE_COMPONENTS = {
@@ -27,6 +28,52 @@ function CurationApp() {
   const { currentPage, toast, setProjects, setCompletedProjects, darkMode, activeUserId, authInitialized, isLoggedIn } = store;
   const PageComponent = PAGE_COMPONENTS[currentPage] || PageP0;
   const theme = getTheme(darkMode);
+
+  const { currentProject, showToast } = store;
+  const projectId = currentProject?.id;
+  const condition = experimentCondition(currentProject);
+  const stage = /^step[1-5]$/.test(currentPage) ? Number(currentPage.slice(-1)) : null;
+  const [savingCondition, setSavingCondition] = useState(false);
+
+  const changeCondition = async value => {
+    setSavingCondition(true);
+    try {
+      const llmParams = { ...currentProject.llmParams, experiment_condition: value || null };
+      await api.projects.update(projectId, { llm_params: llmParams });
+      store.setCurrentProject(project => project?.id === projectId ? { ...project, llmParams } : project);
+      setProjects(items => items.map(item => item.id === projectId ? { ...item, llmParams } : item));
+      void recordInteraction(value ? { id: projectId, llmParams } : currentProject, stage, 'condition_change', {
+        previous: condition, next: value || null,
+      });
+    } catch (error) {
+      showToast('实验配置保存失败，请重试。', 'error');
+    } finally {
+      setSavingCondition(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!projectId || !condition || !stage) return;
+    const project = { id: projectId, llmParams: { experiment_condition: condition } };
+    const visitId = newInteractionId();
+    void recordInteraction(project, stage, 'stage_start', { visit_id: visitId });
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      void recordInteraction(project, stage, 'stage_end', { visit_id: visitId });
+    };
+    window.addEventListener('pagehide', finish, { once: true });
+    return () => {
+      window.removeEventListener('pagehide', finish);
+      finish();
+    };
+  }, [stage, projectId, condition]);
+  useEffect(() => {
+    const fail = () => showToast('实验过程事件保存失败，请检查连接或数据库配置。', 'error');
+    window.addEventListener('experiment-event-save-failed', fail);
+    return () => window.removeEventListener('experiment-event-save-failed', fail);
+  }, [showToast]);
 
   const PAGES_THAT_NEED_PROJECTS = ['p0', 'step1', 'step2', 'step3', 'step4', 'step5', 'exhibits'];
   
@@ -163,6 +210,17 @@ function CurationApp() {
           <Sidebar {...store} theme={theme} />
           <Topbar {...store} theme={theme} />
           <div style={{ marginLeft: 232, paddingTop: 52 }}>
+            {projectId && stage === 1 && isLoggedIn && (
+              <label style={{ display: 'block', padding: '12px 36px 0', color: theme.textSecondary }}>
+                实验配置{' '}
+                <select value={condition || ''} disabled={savingCondition || store.isGenerating}
+                  onChange={event => changeCondition(event.target.value)}>
+                  <option value="">普通项目</option>
+                  <option value="model">模型组</option>
+                  <option value="fixed">对照组</option>
+                </select>
+              </label>
+            )}
             <PageComponent {...store} theme={theme} />
           </div>
         </div>
