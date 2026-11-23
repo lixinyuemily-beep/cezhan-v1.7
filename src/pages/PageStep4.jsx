@@ -703,7 +703,7 @@ export const PageStep4 = ({
 
       {errorMessage && !preview && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
 
-      {!isGenerating && <ReviewSummary notices={notices} onOpen={openNotice} C={C} />}
+      {!isGenerating && <ReviewSummary notices={notices} includesExhibitChecks={Boolean(condition)} onOpen={openNotice} C={C} />}
 
       {textSections.map((sec) => {
         const ownGroup = groupForSection(sec);

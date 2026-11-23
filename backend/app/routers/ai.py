@@ -4,6 +4,7 @@ AI API 路由 - 元景大模型调用
 import asyncio
 import json
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlsplit
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 from ..models.schemas import (
@@ -202,6 +203,14 @@ def _normalize_exhibit_statement(statement, sources):
             "sourceId": source_id, "field": field, "label": source["label"],
             "locator": source["locator"], "value": value,
         }
+        source_url = source.get("url")
+        if isinstance(source_url, str):
+            try:
+                url = urlsplit(source_url.strip())
+                if url.scheme in ("https", "http") and url.hostname and not url.username and not url.password:
+                    reference["url"] = source_url.strip()
+            except ValueError:
+                pass
         if reference not in references:
             references.append(reference)
     kind = "interpretation" if statement.get("kind") == "interpretation" else "fact"
