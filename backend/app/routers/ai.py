@@ -144,7 +144,9 @@ async def generate_text_section(request: TextSectionReq):
             unit=request.unit,
             exhibits=request.exhibits,
             narrative=request.narrative,
-            narrative_rhythm=request.narrative_rhythm
+            narrative_rhythm=request.narrative_rhythm,
+            revision_instruction=request.revision_instruction,
+            current_text=request.current_text
         )
         return TextSectionResp(content=content)
     except Exception as e:

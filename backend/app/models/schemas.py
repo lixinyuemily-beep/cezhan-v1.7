@@ -281,6 +281,8 @@ class TextSectionRequest(BaseModel):
     exhibits: List[Dict[str, Any]] = Field(..., description="展品列表")
     narrative: Dict[str, str] = Field(..., description="叙事方案")
     narrative_rhythm: Optional[Dict[str, Any]] = Field(None, description="叙事节奏配置")
+    revision_instruction: str = Field(default="", max_length=4000)
+    current_text: str = Field(default="", max_length=30000)
 
 
 class TextSectionResponse(BaseModel):

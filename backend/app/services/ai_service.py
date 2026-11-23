@@ -974,7 +974,9 @@ class AIService:
         unit: Dict,
         exhibits: List[Dict],
         narrative: Dict,
-        narrative_rhythm: Dict[str, Any] = None
+        narrative_rhythm: Dict[str, Any] = None,
+        revision_instruction: str = "",
+        current_text: str = ""
     ) -> str:
         """
         生成单元文本内容
@@ -1002,6 +1004,11 @@ class AIService:
             rhythm_instruction=rhythm_instruction
         )
         
+        if revision_instruction.strip():
+            user_prompt += "\n请按策展人意见修改当前文字，只返回一份结果。\n" + json.dumps({
+                "当前文字": current_text, "修改意见": revision_instruction,
+            }, ensure_ascii=False)
+
         result = cls.chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},

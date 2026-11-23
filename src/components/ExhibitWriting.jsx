@@ -10,6 +10,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState([]);
   const [instruction, setInstruction] = useState('');
+  const [heldKeys, setHeldKeys] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [confirmingRule, setConfirmingRule] = useState(false);
@@ -19,19 +20,27 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
   const records = exhibits.map((exhibit, index) => ({ ...exhibit, name: getExhibitName(exhibit), entryKey: String(exhibit.id || exhibit.编号 || `index-${index}`) }));
   const mode = fixed || rule ? 'guided_generation' : 'interactive_editing';
   const scope = { section_key: section.key, content_type: 'exhibit_description' };
-  // Availability is provisional until reference-level checking is added.
-  const available = records.filter(record => record.name && normalizeExhibitKeyText(getExhibitIntroduction(record) || record.intro || record.desc));
+  const available = records.filter(record =>
+    record.name && normalizeExhibitKeyText(getExhibitIntroduction(record) || record.intro || record.desc)
+  );
   const missing = records.filter(record => !available.includes(record));
-  const eligible = fixed && instruction.trim() ? available : available.filter(record => !(section.exhibits || []).some(item =>
-    item.curatorReviewed && (item.entryKey ? item.entryKey === record.entryKey : item.name === record.name)
+  const eligible = available.filter(record => !heldKeys.includes(record.entryKey) && (
+    (instruction.trim() && (fixed || rule)) || !(section.exhibits || []).some(item =>
+      item.curatorReviewed && (item.entryKey ? item.entryKey === record.entryKey : item.name === record.name)
+    )
   ));
+
+  const changeJudgment = (entryKey, hold) => {
+    setHeldKeys(keys => hold ? [...keys, entryKey] : keys.filter(key => key !== entryKey));
+    log('clarification', { scope, kind: 'judgment_override', entry_key: entryKey, state: hold ? 'needs_review' : 'available' });
+  };
 
   const run = async (action, operation) => {
     setBusy(true);
     setError('');
     log('request_start', {
       task: 'exhibit_description', scope, action, mode,
-      ...(fixed ? {} : { state: { writing_rule_confirmed: Boolean(rule), available: available.length, missing: missing.length } }),
+      ...(fixed ? {} : { state: { writing_rule_confirmed: Boolean(rule), available: available.length, missing: missing.length, held_keys: heldKeys } }),
     });
     try {
       await operation();
@@ -51,13 +60,24 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     const target = kind === 'sample' ? eligible.slice(0, 1) : eligible.filter(item => item.entryKey !== savedSample?.key);
     await run(kind, async () => {
       const items = target.length ? await api.ai.writeExhibitDescriptions({
-        action: 'draft', exhibits: target, instruction: fixed ? instruction : (rule?.text || ''),
+        action: 'draft', exhibits: target,
+        instruction: [fixed ? '' : rule?.text, instruction.trim()].filter(Boolean).join('\n'),
       }) : [];
       if (items.length !== target.length || target.some(record => !items.some(item => item.key === record.entryKey && item.text?.trim()))) {
         throw new Error('返回的条目与所选展品不一致，请重新生成。');
       }
-      if (kind === 'sample') setSample({ ...items[0], original: items[0].text });
-      else {
+      if (kind === 'sample') {
+        setSample({ ...items[0], original: items[0].text });
+      } else if (fixed) {
+        const current = section.exhibits || [];
+        const protectedItems = items.filter(item => current.some(entry => matchesRecord(entry, item.key) && entry.curatorReviewed));
+        const drafts = items.filter(item => !protectedItems.includes(item));
+        if (drafts.length && !await save(section, mergeExhibits(drafts, false))) {
+          throw new Error('展品说明未能写入大纲，请重试。');
+        }
+        setCandidates(protectedItems);
+        setSelected(protectedItems.map(item => item.key));
+      } else {
         const preview = savedSample ? [savedSample, ...items] : items;
         setCandidates(preview);
         setSelected(preview.map(item => item.key));
@@ -92,17 +112,37 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     }
   };
 
-  const apply = async () => {
-    const accepted = candidates.filter(item => selected.includes(item.key));
-    const names = new Set(accepted.map(item => records.find(record => record.entryKey === item.key).name));
-    const summaries = (section.exhibits || []).filter(item => item.entryKey ? !selected.includes(item.entryKey) : !names.has(item.name));
-    summaries.push(...accepted.map(item => ({
-      entryKey: item.key, name: records.find(record => record.entryKey === item.key).name,
-      desc: item.text, curatorReviewed: true,
-    })));
+  const matchesRecord = (entry, key) => entry.entryKey
+    ? entry.entryKey === key : entry.name === records.find(record => record.entryKey === key)?.name;
+
+  const mergeExhibits = (items, reviewed) => ({
+    exhibits: [
+      ...(section.exhibits || []).filter(entry => !items.some(item => matchesRecord(entry, item.key))),
+      ...items.map(item => ({
+        entryKey: item.key, name: records.find(record => record.entryKey === item.key)?.name,
+        desc: item.text, curatorReviewed: reviewed, reviewStatus: reviewed ? 'confirmed' : 'pending',
+      })),
+    ],
+  });
+
+  const confirmDescription = async (item) => {
     setBusy(true);
     try {
-      if (!await save(section, { exhibits: summaries })) return;
+      const saved = await save(section, {
+        exhibits: section.exhibits.map(entry => entry === item
+          ? { ...entry, curatorReviewed: true, reviewStatus: 'confirmed' } : entry),
+      });
+      if (saved) log('candidate_disposition', { scope, outcome: 'accepted', selected_keys: [item.entryKey] });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    const accepted = candidates.filter(item => selected.includes(item.key));
+    setBusy(true);
+    try {
+      if (!await save(section, mergeExhibits(accepted, true))) return;
       log('candidate_disposition', { scope, outcome: 'accepted', selected_keys: selected,
         discarded_keys: candidates.filter(item => !selected.includes(item.key)).map(item => item.key) });
       setCandidates([]);
@@ -116,14 +156,27 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       <strong>展品说明</strong>
       {!fixed && <>
         <span>{rule ? '本单元写法已确认，下一次按写法引导生成。' : '写法待确认，先试写一条供策展人修改。'}</span>
+        <details>
+          <summary>本次判断 · {available.length - heldKeys.length} 件可起草，{missing.length} 件缺项</summary>
+          {available.map(record => <label key={record.entryKey} style={{ display: 'block' }}>
+            <input type="checkbox" checked={heldKeys.includes(record.entryKey)} disabled={busy || candidates.length > 0}
+              onChange={event => changeJudgment(record.entryKey, event.target.checked)} /> {record.name} 暂缓起草
+          </label>)}
+        </details>
         {rule && <span>当前生效写法（{scopeLabels[rule.scope] || '本单元'}）：{rule.text}</span>}
       </>}
       <span>本次由人工智能起草，策展人审阅确认。</span>
       {missing.length > 0 && <span>缺少说明资料，暂留空：{missing.map(item => item.name || '未命名展品').join('、')}</span>}
-      {(section.exhibits || []).filter(item => item.curatorReviewed).map(item => (
-        <div key={item.entryKey}><strong>{item.name}</strong>　{item.desc}</div>
+      {(section.exhibits || []).filter(item => item.curatorReviewed || item.reviewStatus === 'pending').map(item => (
+        <div key={item.entryKey}>
+          <strong>{item.name}</strong>　{item.desc}
+          {item.reviewStatus === 'pending' && <>
+            {' '}<span>待审阅</span>{' '}
+            <Btn small disabled={busy} onClick={() => confirmDescription(item)}>确认{item.name}说明</Btn>
+          </>}
+        </div>
       ))}
-      {fixed && <label>本次修改意见 <input value={instruction} onChange={event => setInstruction(event.target.value)} /></label>}
+      <label>本次修改意见 <input value={instruction} disabled={busy} onChange={event => setInstruction(event.target.value)} /></label>
       <div>
         <Btn small disabled={busy || eligible.length === 0 || candidates.length > 0}
           onClick={() => generate(fixed || rule ? 'batch' : 'sample')}>
@@ -150,7 +203,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         <Btn small disabled={busy || !ruleDraft.trim()} onClick={confirmRule}>确认写法</Btn>
       </>}
       {candidates.length > 0 && <>
-        <strong>逐条预览</strong>
+        <strong>{fixed ? '已确认文字的修改建议' : '逐条预览'}</strong>
         {candidates.map(item => {
           const record = records.find(entry => entry.entryKey === item.key);
           const before = (section.exhibits || []).find(entry => entry.name === record.name)?.desc;
@@ -159,6 +212,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
               onChange={event => setSelected(event.target.checked ? [...selected, item.key] : selected.filter(key => key !== item.key))} /> {record.name}</span>
             {before && <span>原文 {before}</span>}
             <span>候选 {item.text}</span>
+
           </label>;
         })}
         <div style={{ display: 'flex', gap: 8 }}>

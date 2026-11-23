@@ -73,6 +73,7 @@ export const PageStep4 = ({
   const C = theme;
   const [editing, setEditing] = useState(null);
   const [regenerateModal, setRegenerateModal] = useState(null);
+  const [revisionInstruction, setRevisionInstruction] = useState('');
   const [regeneratingKey, setRegeneratingKey] = useState(null);
   const editorRef = useRef(null);
   const savedSelectionRef = useRef(null);
@@ -146,7 +147,8 @@ export const PageStep4 = ({
 
   const hasText = html => Boolean(String(html || '').replace(/<[^>]+>|&nbsp;/gi, '').trim());
   const needsRepair = section => section.failed || !hasText(section.text) || (!section.edited && isFailureText(section.text));
-  const needsReview = section => section.reviewStatus === 'pending' || needsRepair(section);
+  const needsReview = section => section.reviewStatus === 'pending' || needsRepair(section)
+    || (section.exhibits || []).some(item => item.reviewStatus === 'pending');
 
   const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
 
@@ -286,7 +288,7 @@ export const PageStep4 = ({
     return response.sections || [];
   };
 
-  const generateSectionContent = async (sectionKey) => {
+  const generateSectionContent = async (sectionKey, instruction = '', currentText = '') => {
     const { narrative, narrativeRhythm, regularUnits, exhibitionTitle } = buildGenerationContext();
 
     if (sectionKey === 'preface') {
@@ -319,6 +321,8 @@ export const PageStep4 = ({
         exhibits: unitExhibits,
         narrative,
         narrative_rhythm: narrativeRhythm,
+        revision_instruction: instruction,
+        current_text: instruction ? currentText.slice(0, 30000) : '',
       }),
       {
         label: `generate text section ${unit?.title || sectionKey}`,
@@ -410,6 +414,7 @@ export const PageStep4 = ({
 
   const handleRegenerate = (section) => {
     setErrorMessage('');
+    setRevisionInstruction('');
     setRegenerateModal(section);
   };
 
@@ -421,11 +426,11 @@ export const PageStep4 = ({
     setRegeneratingKey(section.key);
     const candidateId = newInteractionId();
     const scope = { section_key: section.key, generation_range: fullDraft ? 'outline' : 'section' };
-    logReview('request_start', { task: 'interpretive_text', method: 'regeneration', scope, candidate_id: candidateId });
+    logReview('request_start', { task: 'interpretive_text', method: revisionInstruction.trim() ? 'guided_revision' : 'regeneration', scope, candidate_id: candidateId });
     try {
       const generated = fullDraft
         ? (await generateFullDraftSections()).find(item => String(item.key) === String(section.key))
-        : await generateSectionContent(section.key);
+        : await generateSectionContent(section.key, revisionInstruction.trim(), section.text);
       const text = sanitizeRichTextHtml(generated?.text);
       if (!hasText(text) || generated.failed || isFailureText(text)) {
         throw new Error(generated?.error || '没有可用的候选文本');
@@ -433,10 +438,18 @@ export const PageStep4 = ({
       const approved = (section.exhibits || []).filter(item => item.curatorReviewed);
       const generatedExhibits = generated.exhibits ?? section.exhibits ?? [];
       const exhibits = [...generatedExhibits.filter(item => !approved.some(kept => kept.name === item.name)), ...approved];
+      const replacement = { text, exhibits, edited: false, failed: false };
+      if (condition === 'fixed' && !(section.edited || section.reviewStatus === 'confirmed')) {
+        const saved = await persistSections(textSections.map(item => item === section
+          ? replaceSection(item, { ...replacement, appliedCandidateId: candidateId }) : item));
+        if (!saved) return;
+        logReview('generation_result', { candidate_id: candidateId, outcome: 'written_pending', scope });
+        return;
+      }
       setPreview({
         section,
         candidateId,
-        replacement: { text, exhibits, edited: false, failed: false },
+        replacement,
         restoring: false,
       });
       logReview('generation_result', { candidate_id: candidateId, outcome: 'ready', scope });
@@ -726,12 +739,23 @@ export const PageStep4 = ({
           <div style={{ padding: 20 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: C.textPrimary }}>重新生成确认</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20, lineHeight: 1.6 }}>
-              请选择「{regenerateModal.title}」的重新生成方式。本次由人工智能起草，策展人审阅确认。生成后可对照原文和候选，再决定是否应用。
+              请选择「{regenerateModal.title}」的重新生成方式。本次由人工智能起草，策展人审阅确认。{condition === 'fixed'
+                ? '草稿写入大纲并标为待审阅。已确认或人工编辑的文字以修改建议呈现。'
+                : '生成后可对照原文和候选，再决定是否应用。'}
             </p>
+            {regenerateModal.key !== 'preface' && regenerateModal.key !== 'epilogue' && (
+              <label style={{ display: 'block', marginBottom: 16 }}>本次修改意见
+                <textarea value={revisionInstruction} maxLength={4000} rows={3}
+                  style={{ display: 'block', width: '100%' }}
+                  onChange={event => setRevisionInstruction(event.target.value)} />
+              </label>
+            )}
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <Btn variant="ghost" onClick={() => setRegenerateModal(null)}>取消</Btn>
               <Btn variant="ghost" onClick={() => generateCandidate(false)}>只生成当前段</Btn>
-              <Btn onClick={() => generateCandidate(true)}>整套生成，仅预览当前段</Btn>
+              {condition !== 'fixed' && !revisionInstruction.trim() && (
+                <Btn onClick={() => generateCandidate(true)}>整套生成，仅预览当前段</Btn>
+              )}
             </div>
           </div>
         </Modal>
