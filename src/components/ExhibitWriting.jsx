@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api/client';
-import { getExhibitIntroduction, getExhibitName, normalizeExhibitKeyText } from '../utils/exhibitFields';
+import { getExhibitName } from '../utils/exhibitFields';
+import { assessExhibitEvidence } from '../utils/exhibitEvidence';
 import { Btn } from './ui';
 
 export function ExhibitWriting({ section, exhibits, condition, sharedRules, save, log, C }) {
@@ -20,10 +21,13 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
   const records = exhibits.map((exhibit, index) => ({ ...exhibit, name: getExhibitName(exhibit), entryKey: String(exhibit.id || exhibit.编号 || `index-${index}`) }));
   const mode = fixed || rule ? 'guided_generation' : 'interactive_editing';
   const scope = { section_key: section.key, content_type: 'exhibit_description' };
-  const available = records.filter(record =>
-    record.name && normalizeExhibitKeyText(getExhibitIntroduction(record) || record.intro || record.desc)
-  );
-  const missing = records.filter(record => !available.includes(record));
+  const evidence = new Map(records.map(record => [record.entryKey, assessExhibitEvidence(record)]));
+  const conflicting = records.filter(record => evidence.get(record.entryKey).state === 'conflict');
+  const available = records.filter(record => {
+    const state = evidence.get(record.entryKey).state;
+    return record.name && (state === 'available' || state === 'unlocated');
+  });
+  const missing = records.filter(record => !available.includes(record) && !conflicting.includes(record));
   const eligible = available.filter(record => !heldKeys.includes(record.entryKey) && (
     (instruction.trim() && (fixed || rule)) || !(section.exhibits || []).some(item =>
       item.curatorReviewed && (item.entryKey ? item.entryKey === record.entryKey : item.name === record.name)
@@ -40,7 +44,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     setError('');
     log('request_start', {
       task: 'exhibit_description', scope, action, mode,
-      ...(fixed ? {} : { state: { writing_rule_confirmed: Boolean(rule), available: available.length, missing: missing.length, held_keys: heldKeys } }),
+      ...(fixed ? {} : { state: { writing_rule_confirmed: Boolean(rule), available: available.length, missing: missing.length, conflicting: conflicting.length, held_keys: heldKeys } }),
     });
     try {
       await operation();
@@ -60,8 +64,10 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
     const target = kind === 'sample' ? eligible.slice(0, 1) : eligible.filter(item => item.entryKey !== savedSample?.key);
     await run(kind, async () => {
       const items = target.length ? await api.ai.writeExhibitDescriptions({
-        action: 'draft', exhibits: target,
-        instruction: [fixed ? '' : rule?.text, instruction.trim()].filter(Boolean).join('\n'),
+        action: 'draft', exhibits: target.map(record => {
+          const { sources } = evidence.get(record.entryKey);
+          return sources.length ? { entryKey: record.entryKey, name: record.name, source_records: sources } : record;
+        }), instruction: [fixed ? '' : rule?.text, instruction.trim()].filter(Boolean).join('\n'),
       }) : [];
       if (items.length !== target.length || target.some(record => !items.some(item => item.key === record.entryKey && item.text?.trim()))) {
         throw new Error('返回的条目与所选展品不一致，请重新生成。');
@@ -121,6 +127,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       ...items.map(item => ({
         entryKey: item.key, name: records.find(record => record.entryKey === item.key)?.name,
         desc: item.text, curatorReviewed: reviewed, reviewStatus: reviewed ? 'confirmed' : 'pending',
+        sourceRecords: evidence.get(item.key).sources.map(({ id, label, locator }) => ({ id, label, locator })),
       })),
     ],
   });
@@ -157,7 +164,7 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
       {!fixed && <>
         <span>{rule ? '本单元写法已确认，下一次按写法引导生成。' : '写法待确认，先试写一条供策展人修改。'}</span>
         <details>
-          <summary>本次判断 · {available.length - heldKeys.length} 件可起草，{missing.length} 件缺项</summary>
+          <summary>本次判断 · {available.length - heldKeys.length} 件可起草，{missing.length} 件缺项，{conflicting.length} 件冲突</summary>
           {available.map(record => <label key={record.entryKey} style={{ display: 'block' }}>
             <input type="checkbox" checked={heldKeys.includes(record.entryKey)} disabled={busy || candidates.length > 0}
               onChange={event => changeJudgment(record.entryKey, event.target.checked)} /> {record.name} 暂缓起草
@@ -166,6 +173,16 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
         {rule && <span>当前生效写法（{scopeLabels[rule.scope] || '本单元'}）：{rule.text}</span>}
       </>}
       <span>本次由人工智能起草，策展人审阅确认。</span>
+      {conflicting.length > 0 && <section aria-label="资料冲突">
+        <strong>资料冲突，保留待核对</strong>
+        {conflicting.map(record => <div key={record.entryKey}>
+          <strong>{record.name}</strong>
+          {evidence.get(record.entryKey).conflicts.map(conflict => <div key={conflict.key}>
+            {conflict.label}记载不一致
+            <ul>{conflict.entries.map(entry => <li key={entry.sourceId}>{entry.value}（{entry.label} · {entry.locator}）</li>)}</ul>
+          </div>)}
+        </div>)}
+      </section>}
       {missing.length > 0 && <span>缺少说明资料，暂留空：{missing.map(item => item.name || '未命名展品').join('、')}</span>}
       {(section.exhibits || []).filter(item => item.curatorReviewed || item.reviewStatus === 'pending').map(item => (
         <div key={item.entryKey}>
@@ -212,7 +229,9 @@ export function ExhibitWriting({ section, exhibits, condition, sharedRules, save
               onChange={event => setSelected(event.target.checked ? [...selected, item.key] : selected.filter(key => key !== item.key))} /> {record.name}</span>
             {before && <span>原文 {before}</span>}
             <span>候选 {item.text}</span>
-
+            {evidence.get(item.key).state === 'unlocated'
+              ? <span>导入资料尚无可定位出处，待核实</span>
+              : <span>本次提供的资料：{evidence.get(item.key).sources.map(source => `${source.label} · ${source.locator}`).join('；')}</span>}
           </label>;
         })}
         <div style={{ display: 'flex', gap: 8 }}>
