@@ -74,7 +74,11 @@ export const PageStep4 = ({
   const [regeneratingKey, setRegeneratingKey] = useState(null);
   const editorRef = useRef(null);
   const savedSelectionRef = useRef(null);
-  const autoRepairingRef = useRef(new Set());
+  const [preview, setPreview] = useState(null);
+  const [historySection, setHistorySection] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const currentNarrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
   const infoCardStyle = {
     padding: "14px 16px",
@@ -84,25 +88,49 @@ export const PageStep4 = ({
     boxShadow: "0 10px 24px rgba(15, 23, 42, 0.04)",
   };
 
-  const markStep4Edited = (nextTextSections) => {
-    if (!currentProject) return;
-    const updatedProject = {
-      ...currentProject,
-      step: 4,
-      textSections: nextTextSections,
-    };
-    setCurrentProject?.(updatedProject);
-    setProjects?.((projects || []).map(project => project.id === currentProject.id ? updatedProject : project));
-
-    if (currentProject.id) {
-      api.projects.update(currentProject.id, {
-        step: 4,
-        text_sections: nextTextSections,
-      }).catch((error) => {
-        console.error('保存文本编辑状态失败:', error);
-      });
+  const persistSections = async (nextTextSections) => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    setErrorMessage('');
+    try {
+      if (currentProject?.id) {
+        await api.projects.update(currentProject.id, {
+          text_sections: nextTextSections,
+        });
+      }
+      setTextSections(nextTextSections);
+      setCurrentProject?.(project => project ? { ...project, textSections: nextTextSections } : project);
+      setProjects?.(items => items.map(project => (
+        project.id === currentProject?.id ? { ...project, textSections: nextTextSections } : project
+      )));
+      return true;
+    } catch (error) {
+      console.error('保存文本审核失败:', error);
+      setErrorMessage('保存失败。请重试。');
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
+
+  const versionOf = ({ text, exhibits, edited, failed }) => ({
+    text, exhibits, edited, failed, savedAt: new Date().toISOString(),
+  });
+
+  const replaceSection = (section, replacement) => ({
+    ...section,
+    ...replacement,
+    autoRepairing: false,
+    error: '',
+    reviewStatus: 'pending',
+    reviewVersions: [...(section.reviewVersions || []), versionOf(section)],
+  });
+
+  const hasText = html => Boolean(String(html || '').replace(/<[^>]+>|&nbsp;/gi, '').trim());
+  const needsRepair = section => section.failed || !hasText(section.text) || (!section.edited && isFailureText(section.text));
+  const needsReview = section => section.reviewStatus === 'pending' || needsRepair(section);
 
   const isFailureText = (text = '') => /生成失败|请手动编辑/.test(String(text || ''));
 
@@ -297,58 +325,6 @@ export const PageStep4 = ({
     }
   }, [currentProject]);
 
-  useEffect(() => {
-    const repairableSections = (textSections || []).filter((section) =>
-      section?.failed || isFailureText(section?.text)
-    );
-    if (repairableSections.length === 0 || regeneratingKey) return;
-
-    const section = repairableSections.find((item) => !autoRepairingRef.current.has(item.key));
-    if (!section) return;
-
-    let cancelled = false;
-    autoRepairingRef.current.add(section.key);
-    setRegeneratingKey(section.key);
-    setTextSections((sections) => sections.map((item) =>
-      item.key === section.key ? { ...item, failed: true, autoRepairing: true } : item
-    ));
-
-    generateSectionContent(section.key)
-      .then((generated) => {
-        if (cancelled) return;
-        const nextTextSections = (textSections || []).map((item) =>
-          item.key === section.key
-            ? { ...item, text: generated.text, exhibits: generated.exhibits, edited: false, failed: !!generated.failed, autoRepairing: !!generated.failed, error: generated.error || '' }
-            : item
-        );
-        setTextSections(nextTextSections);
-        markStep4Edited(nextTextSections);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error('自动修复文本生成失败:', error);
-        const nextTextSections = (textSections || []).map((item) =>
-          item.key === section.key
-            ? { ...item, failed: true, autoRepairing: false, error: error.message || '自动修复失败' }
-            : item
-        );
-        setTextSections(nextTextSections);
-        markStep4Edited(nextTextSections);
-        window.setTimeout(() => {
-          autoRepairingRef.current.delete(section.key);
-        }, 5000);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRegeneratingKey(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [textSections, regeneratingKey, units, keptExhibits, currentProject, selectedNarrative, narrativeOptions]);
-
   const saveEditorSelection = () => {
     const selection = window.getSelection?.();
     const editor = editorRef.current;
@@ -391,19 +367,18 @@ export const PageStep4 = ({
     saveEditorSelection();
   };
 
-  const saveEditingSection = (sectionKey) => {
+  const saveEditingSection = async (sectionKey) => {
     if (!editorRef.current) {
       setEditing(null);
       return;
     }
     const nextText = sanitizeRichTextHtml(editorRef.current.innerHTML);
     const currentSection = textSections.find(section => section.key === sectionKey);
-    if (nextText !== currentSection?.text) {
+    if (currentSection && (nextText !== currentSection.text || needsRepair(currentSection))) {
       const nextTextSections = textSections.map(section =>
-        section.key === sectionKey ? { ...section, text: nextText, edited: true } : section
+        section.key === sectionKey ? replaceSection(section, { text: nextText, edited: true, failed: !hasText(nextText) }) : section
       );
-      setTextSections(nextTextSections);
-      markStep4Edited(nextTextSections);
+      if (!await persistSections(nextTextSections)) return;
     }
     setEditing(null);
     savedSelectionRef.current = null;
@@ -414,83 +389,55 @@ export const PageStep4 = ({
     savedSelectionRef.current = null;
   };
 
-  const handleRegenerate = (sectionKey) => {
-    if (regeneratingKey) return;
-    setRegenerateModal({
-      key: sectionKey,
-      title: textSections.find(s => s.key === sectionKey)?.title || sectionKey
-    });
+  const handleRegenerate = (section) => {
+    setErrorMessage('');
+    setRegenerateModal(section);
   };
 
-  const confirmRegenerate = async () => {
-    if (!regenerateModal) return;
-
-    const sectionKey = regenerateModal.key;
-    setRegeneratingKey(sectionKey);
+  const generateCandidate = async (fullDraft) => {
+    const section = regenerateModal;
+    if (!section) return;
     setRegenerateModal(null);
-
+    setErrorMessage('');
+    setRegeneratingKey(section.key);
     try {
-      const generated = await generateSectionContent(sectionKey);
-
-      const nextTextSections = textSections.map(s =>
-        s.key === sectionKey
-          ? { ...s, text: generated.text, exhibits: generated.exhibits, edited: false, failed: !!generated.failed, autoRepairing: !!generated.failed, error: generated.error || '' }
-          : s
-      );
-      setTextSections(nextTextSections);
-      markStep4Edited(nextTextSections);
-    } catch (error) {
-      console.error('重新生成文本失败:', error);
-    } finally {
-      setRegeneratingKey(null);
-    }
-  };
-
-  const confirmRegenerateFromFullDraft = async () => {
-    if (!regenerateModal) return;
-
-    const sectionKey = regenerateModal.key;
-    setRegeneratingKey(sectionKey);
-    setRegenerateModal(null);
-
-    try {
-      const generatedSections = await generateFullDraftSections();
-      const generatedSection = generatedSections.find(section => String(section.key) === String(sectionKey));
-      if (!generatedSection?.text) {
-        throw new Error('整套生成结果里没有当前段落');
+      const generated = fullDraft
+        ? (await generateFullDraftSections()).find(item => String(item.key) === String(section.key))
+        : await generateSectionContent(section.key);
+      const text = sanitizeRichTextHtml(generated?.text);
+      if (!hasText(text) || generated.failed || isFailureText(text)) {
+        throw new Error(generated?.error || '没有可用的候选文本');
       }
-
-      const nextTextSections = textSections.map(section =>
-        section.key === sectionKey
-          ? {
-              ...section,
-              title: generatedSection.title || section.title,
-              text: generatedSection.text,
-              exhibits: Array.isArray(generatedSection.exhibits) ? generatedSection.exhibits : section.exhibits,
-              edited: false,
-              failed: false,
-              autoRepairing: false,
-              error: '',
-            }
-          : section
-      );
-      setTextSections(nextTextSections);
-      markStep4Edited(nextTextSections);
+      setPreview({
+        section,
+        replacement: { text, exhibits: generated.exhibits ?? section.exhibits, edited: false, failed: false },
+        restoring: false,
+      });
     } catch (error) {
-      console.error('整套生成并替换当前段失败:', error);
-      const nextTextSections = textSections.map(section =>
-        section.key === sectionKey
-          ? { ...section, failed: true, autoRepairing: true, error: error.message || '整套生成失败' }
-          : section
-      );
-      setTextSections(nextTextSections);
-      markStep4Edited(nextTextSections);
-      window.setTimeout(() => {
-        autoRepairingRef.current.delete(sectionKey);
-      }, 1000);
+      console.error('生成候选文本失败:', error);
+      setErrorMessage('候选生成失败。原文已保留，你可以重新尝试或直接编辑。');
     } finally {
       setRegeneratingKey(null);
     }
+  };
+
+  const applyPreview = async () => {
+    const current = textSections.find(section => section.key === preview.section.key);
+    if (current !== preview.section) {
+      setPreview(null);
+      setErrorMessage('当前文字已变化，请重新打开预览。');
+      return;
+    }
+    const saved = await persistSections(textSections.map(section => (
+      section === current ? replaceSection(section, preview.replacement) : section
+    )));
+    if (saved) setPreview(null);
+  };
+
+  const confirmSection = async (key) => {
+    await persistSections(textSections.map(section => (
+      section.key === key ? { ...section, reviewStatus: 'confirmed' } : section
+    )));
   };
 
   return (
@@ -592,7 +539,9 @@ export const PageStep4 = ({
         </div>
       </div>
 
-      {textSections.map((sec, i) => (
+      {errorMessage && !preview && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
+
+      {textSections.map((sec) => (
         <div key={sec.key} style={{
           marginBottom: 24,
           borderRadius: 22,
@@ -607,21 +556,19 @@ export const PageStep4 = ({
                 {sec.title}
               </h2>
               {sec.edited && <Tag label="[已修改]" color={C.humanEdited} textColor={C.accentSecondary} />}
-              {sec.autoRepairing && <Tag label="[自动修复中]" color={C.aiGenerated} textColor={C.accentPrimary} />}
+              {needsReview(sec) && <Tag label="待审阅" color={C.aiGenerated} textColor={C.accentPrimary} />}
             </div>
-            <span
-              onClick={() => handleRegenerate(sec.key)}
-              style={{
-                color: regeneratingKey ? C.textSecondary : C.accentPrimary,
-                cursor: regeneratingKey ? "not-allowed" : "pointer",
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <RefreshIcon /> {regeneratingKey === sec.key ? '生成中' : '重新生成'}
-            </span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {sec.reviewVersions?.length > 0 && (
+                <Btn small variant="ghost" disabled={saving || editing !== null} onClick={() => setHistorySection(sec)}>版本记录</Btn>
+              )}
+              <Btn small variant="ghost" disabled={saving || editing !== null} onClick={() => handleRegenerate(sec)}>
+                <RefreshIcon /> 重新生成
+              </Btn>
+              {sec.reviewStatus !== 'confirmed' && !needsRepair(sec) && (
+                <Btn small disabled={saving || editing !== null} onClick={() => confirmSection(sec.key)}>确认本段</Btn>
+              )}
+            </div>
           </div>
 
           {editing === sec.key ? (
@@ -650,20 +597,20 @@ export const PageStep4 = ({
                 borderTop: `1px solid ${C.border}`,
                 background: C.bgPrimary,
               }}>
-                <Btn variant="ghost" onClick={cancelEditingSection}>取消</Btn>
-                <Btn onClick={() => saveEditingSection(sec.key)}>确定保存</Btn>
+                <Btn variant="ghost" disabled={saving} onClick={cancelEditingSection}>取消</Btn>
+                <Btn disabled={saving} onClick={() => saveEditingSection(sec.key)}>确定保存</Btn>
               </div>
             </div>
           ) : (
             <div
-              onClick={() => setEditing(sec.key)}
+              onClick={() => { if (!saving && editing === null) setEditing(sec.key); }}
               style={{
                 padding: "16px 18px", borderRadius: 16, cursor: "text",
                 background: sec.edited ? C.humanEdited : C.aiGenerated,
                 fontSize: 14, lineHeight: 1.8, color: C.textPrimary, fontFamily: "var(--font-serif)",
                 border: `1px solid ${sec.edited ? C.accentSecondary + "44" : C.accentPrimary + "22"}`,
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml((sec.autoRepairing || sec.failed || isFailureText(sec.text)) ? '<p>正在继续生成文本，请稍候…</p>' : sec.text) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(needsRepair(sec) ? '<p>生成失败。可重新生成或直接编辑。</p>' : sec.text) }}
             />
           )}
 
@@ -704,12 +651,12 @@ export const PageStep4 = ({
             确认文本后进入完整大纲
           </div>
           <div style={{ marginTop: 4, fontSize: 12, color: C.warning }}>
-            请先确认各段文字的表述、结构与学术准确性，再进入最终交付页。
+            {textSections.some(needsReview) ? '请先处理生成失败的段落，并确认待审阅的文字。' : '请核对各段文字的表述、结构与学术准确性。'}
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <Btn variant="ghost" onClick={goPrevStep}>← 返回 Step3</Btn>
-          <Btn onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
+          <Btn variant="ghost" disabled={saving || editing !== null} onClick={goPrevStep}>← 返回 Step3</Btn>
+          <Btn disabled={saving || editing !== null || textSections.some(needsReview)} onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
         </div>
       </div>
 
@@ -718,14 +665,53 @@ export const PageStep4 = ({
           <div style={{ padding: 20 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: C.textPrimary }}>重新生成确认</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20, lineHeight: 1.6 }}>
-              请选择「{regenerateModal.title}」的重新生成方式。当前段落内容将被覆盖，无法恢复。
+              请选择「{regenerateModal.title}」的重新生成方式。生成后可对照原文和候选，再决定是否应用。
             </p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <Btn variant="ghost" onClick={() => setRegenerateModal(null)}>取消</Btn>
-              <Btn variant="ghost" onClick={confirmRegenerate}>只生成当前段</Btn>
-              <Btn onClick={confirmRegenerateFromFullDraft}>整套生成，仅替换当前段</Btn>
+              <Btn variant="ghost" onClick={() => generateCandidate(false)}>只生成当前段</Btn>
+              <Btn onClick={() => generateCandidate(true)}>整套生成，仅预览当前段</Btn>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {historySection && (
+        <Modal C={C} title="版本记录" onClose={() => setHistorySection(null)} showFooter={false}>
+          {historySection.reviewVersions.slice().reverse().map((version, index) => (
+            <div key={index} style={{ padding: '8px 0', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span>{new Date(version.savedAt).toLocaleString('zh-CN')}</span>
+              <Btn small variant="ghost" onClick={() => {
+                const { savedAt, ...replacement } = version;
+                setErrorMessage('');
+                setPreview({ section: historySection, replacement, restoring: true });
+                setHistorySection(null);
+              }}>查看版本</Btn>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {preview && (
+        <Modal C={C} width={900} title={preview.restoring ? '对照历史版本' : '对照生成候选'}
+          onClose={() => { if (!savingRef.current) setPreview(null); }}
+          footer={<>
+            <Btn variant="ghost" disabled={saving} onClick={() => setPreview(null)}>保留原文</Btn>
+            <Btn disabled={saving} onClick={applyPreview}>{preview.restoring ? '恢复此版本' : '应用候选'}</Btn>
+          </>}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 16 }}>
+            {[
+              ['当前原文', preview.section.text],
+              [preview.restoring ? '历史版本' : '生成候选', preview.replacement.text],
+            ].map(([label, html]) => (
+              <section key={label} style={infoCardStyle}>
+                <h4>{label}</h4>
+                <div dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(html) }} />
+              </section>
+            ))}
+          </div>
+          {errorMessage && <p role="alert" style={{ color: C.warning }}>{errorMessage}</p>}
         </Modal>
       )}
 
@@ -756,7 +742,7 @@ export const PageStep4 = ({
               正在重新生成
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
-              请稍候，系统正在更新当前段落内容。
+              请稍候，系统正在生成供审阅的候选。
             </div>
           </div>
         </div>
