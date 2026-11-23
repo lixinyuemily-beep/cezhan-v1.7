@@ -2,9 +2,11 @@
 认证 API 路由
 """
 import hashlib
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from time import monotonic
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -16,6 +18,7 @@ from ..services.email_service import email_service
 from ..services.session_service import SessionService
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+logger = logging.getLogger("uvicorn.error")
 
 
 def normalize_email(email: str) -> str:
@@ -57,32 +60,45 @@ def build_auth_response(user: dict, message: Optional[str] = None):
 
 
 @router.post("/send-code")
-async def send_code(payload: EmailAuthRequest):
-    """发送邮箱验证码，后端自行存储验证码和登录态。"""
+def send_code(payload: EmailAuthRequest):
+    """发送邮箱验证码。同步路由由 FastAPI 在线程池执行阻塞 I/O。"""
+    email = normalize_email(payload.email)
+    code = f"{secrets.randbelow(1000000):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.email_code_expires_minutes)
+    started = monotonic()
+    logger.info("Email verification request started")
     try:
-        email = normalize_email(payload.email)
-        code = f"{secrets.randbelow(1000000):06d}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.email_code_expires_minutes)
-        auth_db.create_email_verification_code({
+        verification = auth_db.create_email_verification_code({
             "email": email,
             "code_hash": hash_verification_code(email, code),
             "expires_at": expires_at.isoformat(),
         })
+        if not verification:
+            raise RuntimeError("Verification record was not created")
+    except Exception as exc:
+        logger.warning("Email verification database step failed after %.2fs (%s)",
+                       monotonic() - started, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="验证码服务暂时不可用，请稍后重试") from None
 
+    stored = monotonic()
+    try:
         send_result = email_service.send_verification_code(email, code)
-        response = {
-            "success": True,
-            "email": email,
-            "message": "验证码已发送，请注意查收邮件",
-        }
-        if send_result.get("debug_code"):
-            response["debug_code"] = send_result["debug_code"]
-            response["message"] = "开发环境验证码已生成"
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:
+        logger.warning("Email verification SMTP step failed after %.2fs (%s)",
+                       monotonic() - stored, type(exc).__name__)
+        try:
+            auth_db.mark_email_verification_code_used(verification["id"])
+        except Exception as cleanup_error:
+            logger.warning("Failed to retire undelivered verification code (%s)",
+                           type(cleanup_error).__name__)
+        raise HTTPException(status_code=502, detail="验证码邮件发送失败，请稍后重试") from None
+
+    logger.info("Email verification sent (database=%.2fs, mail=%.2fs)", stored - started, monotonic() - stored)
+    response = {"success": True, "email": email, "message": "验证码已发送，请注意查收邮件"}
+    if send_result.get("debug_code"):
+        response["debug_code"] = send_result["debug_code"]
+        response["message"] = "开发环境验证码已生成"
+    return response
 
 
 @router.post("/verify-code")

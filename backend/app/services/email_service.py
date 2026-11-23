@@ -43,9 +43,9 @@ class EmailService:
 
             message = cls._build_message(email, code)
             if settings.smtp_use_ssl:
-                server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20)
+                server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=8)
             else:
-                server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
+                server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=8)
 
             try:
                 server.ehlo()
